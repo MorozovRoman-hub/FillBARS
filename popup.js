@@ -3,22 +3,32 @@
 // ==============================================
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
+const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
 let CONFIG_ASSIGNMENT_SETTINGS = {};
+let CONFIG_DRUG_CATALOG = [];
 // ==============================================
 
 const PROFILE_STORAGE_KEY = 'barsCustomProfilesV4';
 const ACTIVE_PROFILE_NAMES_STORAGE_KEY = 'barsActiveProfileNamesV1';
 const RESEARCH_CATALOG_STORAGE_KEY = 'barsResearchCatalogV3';
 const ASSIGNMENT_SETTINGS_STORAGE_KEY = 'barsAssignmentSettingsV1';
+const CUSTOM_DRUG_CATALOG_STORAGE_KEY = 'barsCustomDrugCatalogV1';
+const TEMP_PRINT_PAYLOAD_PREFIX = 'barsPrintPayload:';
+const JOURNAL_DB_NAME = 'FillBARSAssignments';
+const JOURNAL_DB_VERSION = 1;
+const JOURNAL_STORE_NAME = 'assignments';
+const DEFAULT_JOURNAL_RETENTION_DAYS = 60;
 const ASSIGNMENT_STAGE_ANALYSES = 'analyses';
 const ASSIGNMENT_STAGE_SCHEDULE = 'schedule';
 const DEFAULT_ASSIGNMENT_SETTINGS = {
     assignmentStage: ASSIGNMENT_STAGE_ANALYSES,
     targetCabinet: '',
-    markUrgent: false
+    markUrgent: false,
+    journalEnabled: true,
+    journalRetentionDays: DEFAULT_JOURNAL_RETENTION_DAYS
 };
 const PROFILE_ICONS = ['🔴', '🟠', '🟡', '🫁', '⚠️', '🏥', '⭐', '🩸', '❤️', '🧪', '🦠', '🧬', '💊', '🔬', '🧫', '🩺', '🚑', '📋'];
 const CHECKBOX_SELECTOR = 'input[name="GridResearch_SelectList_Item"]';
@@ -51,10 +61,89 @@ let PROFILES = {};
 let loadedResearches = loadSavedResearches();
 let editingProfileName = null;
 let selectedResearchIds = new Set();
+let selectedMedications = [];
 let selectedProfileIcon = PROFILE_ICONS[0];
+let activeProfileEditorTab = 'analyses';
 
 function isPlainObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeAnalyses(rawAnalyses) {
+    if (!isPlainObject(rawAnalyses)) {
+        return {};
+    }
+
+    return Object.entries(rawAnalyses).reduce((result, [researchId, enabled]) => {
+        if (researchId && enabled === true) {
+            result[researchId] = true;
+        }
+        return result;
+    }, {});
+}
+
+function generateId(prefix = 'id') {
+    if (globalThis.crypto?.randomUUID) {
+        return `${prefix}-${globalThis.crypto.randomUUID()}`;
+    }
+
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeMedication(rawMedication = {}) {
+    if (!isPlainObject(rawMedication)) {
+        return null;
+    }
+
+    const name = String(rawMedication.name || '').trim();
+    if (!name) {
+        return null;
+    }
+
+    return {
+        id: String(rawMedication.id || generateId('custom')),
+        source: rawMedication.source === 'catalog' ? 'catalog' : 'manual',
+        atc: String(rawMedication.atc || '').trim(),
+        name,
+        form: String(rawMedication.form || '').trim(),
+        dose: String(rawMedication.dose || '').trim(),
+        route: String(rawMedication.route || '').trim(),
+        frequency: String(rawMedication.frequency || '').trim(),
+        duration: String(rawMedication.duration || '').trim(),
+        regimen: String(rawMedication.regimen || '').trim(),
+        comment: String(rawMedication.comment || '').trim()
+    };
+}
+
+function normalizeMedications(rawMedications) {
+    if (!Array.isArray(rawMedications)) {
+        return [];
+    }
+
+    return rawMedications
+        .map(normalizeMedication)
+        .filter(Boolean);
+}
+
+function normalizeProfile(rawProfile) {
+    if (!isPlainObject(rawProfile)) {
+        return {
+            analyses: {},
+            medications: []
+        };
+    }
+
+    if (isPlainObject(rawProfile.analyses) || Array.isArray(rawProfile.medications)) {
+        return {
+            analyses: normalizeAnalyses(rawProfile.analyses),
+            medications: normalizeMedications(rawProfile.medications)
+        };
+    }
+
+    return {
+        analyses: normalizeAnalyses(rawProfile),
+        medications: []
+    };
 }
 
 function normalizeProfiles(rawProfiles) {
@@ -62,19 +151,12 @@ function normalizeProfiles(rawProfiles) {
         return {};
     }
 
-    return Object.entries(rawProfiles).reduce((profiles, [profileName, analyses]) => {
-        if (!profileName || !isPlainObject(analyses)) {
+    return Object.entries(rawProfiles).reduce((profiles, [profileName, rawProfile]) => {
+        if (!profileName || !isPlainObject(rawProfile)) {
             return profiles;
         }
 
-        const normalizedAnalyses = Object.entries(analyses).reduce((result, [researchId, enabled]) => {
-            if (researchId && enabled === true) {
-                result[researchId] = true;
-            }
-            return result;
-        }, {});
-
-        profiles[profileName] = normalizedAnalyses;
+        profiles[profileName] = normalizeProfile(rawProfile);
         return profiles;
     }, {});
 }
@@ -102,12 +184,65 @@ function normalizeAssignmentSettings(settings = {}) {
     const requestedStage = settings.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE
         ? ASSIGNMENT_STAGE_SCHEDULE
         : ASSIGNMENT_STAGE_ANALYSES;
+    const retentionDays = Number.parseInt(settings.journalRetentionDays, 10);
 
     return {
         assignmentStage: targetCabinet ? requestedStage : ASSIGNMENT_STAGE_ANALYSES,
         targetCabinet,
-        markUrgent: settings.markUrgent === true
+        markUrgent: settings.markUrgent === true,
+        journalEnabled: settings.journalEnabled !== false,
+        journalRetentionDays: Number.isFinite(retentionDays) && retentionDays > 0
+            ? retentionDays
+            : DEFAULT_JOURNAL_RETENTION_DAYS
     };
+}
+
+function normalizeDrugCatalog(rawCatalog) {
+    if (!Array.isArray(rawCatalog)) {
+        return [];
+    }
+
+    const byId = new Map();
+    for (const rawDrug of rawCatalog) {
+        if (!isPlainObject(rawDrug)) {
+            continue;
+        }
+
+        const name = String(rawDrug.name || '').trim();
+        if (!name) {
+            continue;
+        }
+
+        const atc = String(rawDrug.atc || '').trim();
+        const id = String(rawDrug.id || `${atc || 'drug'}-${name}`).trim();
+        const forms = Array.isArray(rawDrug.forms)
+            ? rawDrug.forms.map((form) => String(form || '').trim()).filter(Boolean)
+            : [];
+
+        byId.set(id, {
+            id,
+            atc,
+            group: String(rawDrug.group || '').trim(),
+            name,
+            forms: Array.from(new Set(forms))
+        });
+    }
+
+    return Array.from(byId.values()).sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+}
+
+async function loadDrugCatalogFile() {
+    try {
+        const response = await fetch(chrome.runtime.getURL(DRUG_CATALOG_FILE_NAME), { cache: 'no-store' });
+        if (!response.ok) {
+            return [];
+        }
+
+        return normalizeDrugCatalog(await response.json());
+    } catch (error) {
+        console.warn(`Не удалось прочитать ${DRUG_CATALOG_FILE_NAME}`, error);
+        return [];
+    }
 }
 
 async function loadExtensionConfigFile() {
@@ -130,6 +265,7 @@ function applyExtensionConfig(config) {
     CONFIG_ACTIVE_PROFILE_NAMES = normalizeProfileNameList(config?.activeProfiles || [], CONFIG_TEMPLATES);
     CONFIG_RESEARCH_CATALOG = getNormalizedResearchCatalog(config?.researchCatalog || {});
     CONFIG_ASSIGNMENT_SETTINGS = normalizeAssignmentSettings(config?.settings || {});
+    CONFIG_DRUG_CATALOG = normalizeDrugCatalog(config?.drugCatalog || []);
     loadedResearches = loadSavedResearches();
 }
 
@@ -162,11 +298,20 @@ function getTemplateLibrary() {
     };
 }
 
+function getProfileAnalyses(profile) {
+    return normalizeProfile(profile).analyses;
+}
+
+function getProfileMedications(profile) {
+    return normalizeProfile(profile).medications;
+}
+
 function getActiveProfileNames() {
     const profileLibrary = getTemplateLibrary();
     const rawValue = localStorage.getItem(ACTIVE_PROFILE_NAMES_STORAGE_KEY);
     if (rawValue === null) {
-        return normalizeProfileNameList(CONFIG_ACTIVE_PROFILE_NAMES, profileLibrary);
+        const defaultActiveNames = normalizeProfileNameList(CONFIG_ACTIVE_PROFILE_NAMES, profileLibrary);
+        return defaultActiveNames.length > 0 ? defaultActiveNames : Object.keys(profileLibrary);
     }
 
     return normalizeProfileNameList(readJsonStorage(ACTIVE_PROFILE_NAMES_STORAGE_KEY, []), profileLibrary);
@@ -241,6 +386,49 @@ function saveResearchCatalog(catalog) {
     writeJsonStorage(RESEARCH_CATALOG_STORAGE_KEY, catalog);
 }
 
+function getCustomDrugCatalog() {
+    return normalizeDrugCatalog(readJsonStorage(CUSTOM_DRUG_CATALOG_STORAGE_KEY, []));
+}
+
+function saveCustomDrugCatalog(catalog) {
+    writeJsonStorage(CUSTOM_DRUG_CATALOG_STORAGE_KEY, normalizeDrugCatalog(catalog));
+}
+
+function getDrugCatalog() {
+    return normalizeDrugCatalog([
+        ...CONFIG_DRUG_CATALOG,
+        ...getCustomDrugCatalog()
+    ]);
+}
+
+function medicationToText(medication) {
+    const normalized = normalizeMedication(medication);
+    if (!normalized) {
+        return '';
+    }
+
+    return [
+        normalized.name,
+        normalized.form,
+        normalized.dose,
+        normalized.route,
+        normalized.frequency,
+        normalized.duration,
+        normalized.regimen,
+        normalized.comment
+    ].filter(Boolean).join(', ');
+}
+
+function getAnalysesForPrint(profile) {
+    const catalog = getResearchCatalog();
+    return Object.keys(getProfileAnalyses(profile))
+        .map((id) => ({
+            id,
+            name: catalog[id] || `Исследование ${id}`
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+}
+
 function getAssignmentSettings() {
     const savedSettings = readJsonStorage(ASSIGNMENT_SETTINGS_STORAGE_KEY, {});
     return normalizeAssignmentSettings({
@@ -261,6 +449,8 @@ function updateAssignmentStageUi(settings = getAssignmentSettings()) {
     const label = document.getElementById('assignmentStageText');
     const targetCabinetInput = document.getElementById('targetCabinetInput');
     const markUrgentCheckbox = document.getElementById('markUrgentCheckbox');
+    const journalEnabledCheckbox = document.getElementById('journalEnabledCheckbox');
+    const journalRetentionInput = document.getElementById('journalRetentionDays');
     const hint = document.getElementById('assignmentStageHint');
 
     if (!slider || !label) {
@@ -282,6 +472,14 @@ function updateAssignmentStageUi(settings = getAssignmentSettings()) {
 
     if (markUrgentCheckbox) {
         markUrgentCheckbox.checked = normalizedSettings.markUrgent;
+    }
+
+    if (journalEnabledCheckbox) {
+        journalEnabledCheckbox.checked = normalizedSettings.journalEnabled;
+    }
+
+    if (journalRetentionInput) {
+        journalRetentionInput.value = normalizedSettings.journalRetentionDays;
     }
 
     if (hint) {
@@ -378,12 +576,13 @@ function renderProfileManagerList() {
     }
 
     for (const profileName of profileNames) {
+        const profile = normalizeProfile(PROFILES[profileName]);
         const row = document.createElement('div');
         row.className = 'profile-row';
 
         const name = document.createElement('span');
         name.className = 'profile-row-name';
-        name.textContent = profileName;
+        name.textContent = `${profileName} (${Object.keys(profile.analyses).length} ан., ${profile.medications.length} преп.)`;
 
         const editButton = document.createElement('button');
         editButton.type = 'button';
@@ -537,6 +736,885 @@ function renderResearchList() {
     }
 }
 
+function openJournalDb() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(JOURNAL_DB_NAME, JOURNAL_DB_VERSION);
+
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(JOURNAL_STORE_NAME)) {
+                const store = db.createObjectStore(JOURNAL_STORE_NAME, { keyPath: 'id' });
+                store.createIndex('createdAt', 'createdAt');
+                store.createIndex('medicalCardNumber', 'medicalCardNumber');
+            }
+        };
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function withJournalStore(mode, callback) {
+    const db = await openJournalDb();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(JOURNAL_STORE_NAME, mode);
+        const store = transaction.objectStore(JOURNAL_STORE_NAME);
+        const result = callback(store);
+
+        transaction.oncomplete = () => {
+            db.close();
+            resolve(result);
+        };
+        transaction.onerror = () => {
+            db.close();
+            reject(transaction.error);
+        };
+    });
+}
+
+function requestToPromise(request) {
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function getJournalEntries() {
+    const entries = await withJournalStore('readonly', (store) => requestToPromise(store.getAll()));
+    return entries.sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+}
+
+async function addJournalEntry(entry) {
+    await withJournalStore('readwrite', (store) => {
+        store.put(entry);
+    });
+}
+
+async function deleteJournalEntry(id) {
+    await withJournalStore('readwrite', (store) => {
+        store.delete(id);
+    });
+}
+
+async function clearJournal() {
+    await withJournalStore('readwrite', (store) => {
+        store.clear();
+    });
+}
+
+async function cleanupOldJournalEntries() {
+    const settings = getAssignmentSettings();
+    const cutoff = Date.now() - settings.journalRetentionDays * 24 * 60 * 60 * 1000;
+    const entries = await getJournalEntries();
+    const oldEntries = entries.filter((entry) => Date.parse(entry.createdAt) < cutoff);
+
+    if (oldEntries.length === 0) {
+        return 0;
+    }
+
+    await withJournalStore('readwrite', (store) => {
+        for (const entry of oldEntries) {
+            store.delete(entry.id);
+        }
+    });
+
+    return oldEntries.length;
+}
+
+function getSelectedProfileName() {
+    return document.getElementById('profileSelect')?.value || '';
+}
+
+function getPatientPrintFields() {
+    return {
+        fullName: document.getElementById('patientFullName')?.value.trim() || '',
+        birthDate: document.getElementById('patientBirthDate')?.value || '',
+        appointmentDate: document.getElementById('appointmentDate')?.value || new Date().toISOString().slice(0, 10)
+    };
+}
+
+function normalizeDateForInput(value) {
+    const rawValue = String(value || '').trim();
+    if (!rawValue) {
+        return '';
+    }
+
+    const isoMatch = rawValue.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+    if (isoMatch) {
+        return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    }
+
+    const ruMatch = rawValue.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/);
+    if (ruMatch) {
+        return `${ruMatch[3]}-${ruMatch[2].padStart(2, '0')}-${ruMatch[1].padStart(2, '0')}`;
+    }
+
+    return '';
+}
+
+function sanitizePulledFullName(value) {
+    const rawValue = String(value || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*,.*$/, '')
+        .trim();
+
+    if (!rawValue || /[{}();=]|\b(Form|function|return|var|const|let|D3Api)\b/i.test(rawValue)) {
+        return '';
+    }
+
+    const words = rawValue.match(/[А-ЯЁ][а-яё-]+/g) || [];
+    if (words.length >= 2) {
+        return words.slice(-3).join(' ');
+    }
+
+    return '';
+}
+
+function fillPulledPatientData(data = {}) {
+    const fullName = sanitizePulledFullName(data.fullName);
+    const birthDate = normalizeDateForInput(data.birthDate);
+
+    if (fullName) {
+        document.getElementById('patientFullName').value = fullName;
+    }
+
+    if (birthDate) {
+        document.getElementById('patientBirthDate').value = birthDate;
+    }
+
+    if (fullName || birthDate) {
+        const missing = [
+            fullName ? '' : 'ФИО',
+            birthDate ? '' : 'даты рождения'
+        ].filter(Boolean);
+        setStatus(`✅ Данные пациента подтянуты${missing.length ? `, не найдено: ${missing.join(', ')}` : ''}`);
+    } else {
+        setStatus('⚠️ Не удалось найти ФИО и дату рождения на странице БАРС', '#ff9800');
+    }
+}
+
+function scorePulledPatientData(data = {}) {
+    const medicalCardNumber = String(data.medicalCardNumber || '').trim();
+    const fullName = String(data.fullName || '').trim();
+    const birthDate = normalizeDateForInput(data.birthDate);
+    let score = 0;
+
+    if (/^\d{4,}$/.test(medicalCardNumber)) {
+        score += 3;
+    }
+
+    if (/^[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+){1,3}$/.test(fullName)) {
+        score += 4;
+    }
+
+    if (birthDate) {
+        score += 3;
+    }
+
+    return score;
+}
+
+function pickBestPatientData(results = []) {
+    const payloads = results
+        .map((result) => result?.result || {})
+        .filter((data) => data && typeof data === 'object');
+    const isLikelyFullName = (value) => {
+        return !!sanitizePulledFullName(value);
+    };
+
+    const fullName = payloads
+        .map((data) => sanitizePulledFullName(data.fullName))
+        .find(isLikelyFullName) || '';
+    const birthDate = payloads
+        .map((data) => normalizeDateForInput(data.birthDate))
+        .find(Boolean) || '';
+    const medicalCardNumber = payloads
+        .map((data) => String(data.medicalCardNumber || '').trim())
+        .filter((value) => /^\d{6,}$/.test(value))
+        .sort((left, right) => right.length - left.length)[0] || '';
+
+    if (fullName || birthDate || medicalCardNumber) {
+        return {
+            medicalCardNumber,
+            fullName,
+            birthDate
+        };
+    }
+
+    return payloads.sort((left, right) => scorePulledPatientData(right) - scorePulledPatientData(left))[0] || {};
+}
+
+async function pullPatientFromBarsPage() {
+    const button = document.getElementById('pullPatientFromBars');
+    button.disabled = true;
+    setStatus('⏳ Поиск данных пациента на странице БАРС...', '#ff9800');
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (!tabs || !tabs[0]) {
+            button.disabled = false;
+            setStatus('❌ Активная вкладка не найдена', '#f44336');
+            return;
+        }
+
+        chrome.scripting.executeScript({
+            target: { tabId: tabs[0].id, allFrames: true },
+            func: readPatientDataFromBarsPage
+        }, (results) => {
+            button.disabled = false;
+
+            if (chrome.runtime.lastError) {
+                setStatus(`❌ Не удалось прочитать страницу: ${chrome.runtime.lastError.message}`, '#f44336');
+                return;
+            }
+
+            fillPulledPatientData(pickBestPatientData(results || []));
+        });
+    });
+}
+
+function buildAssignmentPayload(profileName, options = {}) {
+    const profile = normalizeProfile(options.profile || PROFILES[profileName]);
+    if (!profileName || !PROFILES[profileName] && !options.profile) {
+        return null;
+    }
+
+    return {
+        generatedAt: new Date().toISOString(),
+        profileName,
+        patient: options.patient || getPatientPrintFields(),
+        medications: getProfileMedications(profile),
+        analyses: getAnalysesForPrint(profile)
+    };
+}
+
+function openPrintPayload(payload) {
+    const key = `${TEMP_PRINT_PAYLOAD_PREFIX}${generateId('print')}`;
+    localStorage.setItem(key, JSON.stringify(payload));
+    chrome.tabs.create({
+        url: chrome.runtime.getURL(`print.html?payload=${encodeURIComponent(key)}`)
+    });
+}
+
+function openPrintSheetForSelectedProfile() {
+    const profileName = getSelectedProfileName();
+    const payload = buildAssignmentPayload(profileName);
+    if (!payload) {
+        setStatus('❌ Выберите профиль назначений', '#f44336');
+        return;
+    }
+
+    localStorage.setItem('lastSelectedProfile', profileName);
+    openPrintPayload(payload);
+}
+
+async function saveSelectedProfileToJournal() {
+    const settings = getAssignmentSettings();
+    if (!settings.journalEnabled) {
+        setStatus('❌ Журнал отключён в настройках', '#f44336');
+        return;
+    }
+
+    const profileName = getSelectedProfileName();
+    const payload = buildAssignmentPayload(profileName);
+    if (!payload) {
+        setStatus('❌ Выберите профиль назначений', '#f44336');
+        return;
+    }
+
+    const entry = {
+        id: generateId('journal'),
+        createdAt: new Date().toISOString(),
+        medicalCardNumber: '',
+        profileName,
+        medications: payload.medications,
+        analyses: payload.analyses
+    };
+
+    await addJournalEntry(entry);
+    renderJournalPanel();
+    setStatus('✅ Запись сохранена в локальный журнал');
+}
+
+function buildPayloadFromJournalEntry(entry) {
+    return {
+        generatedAt: entry.createdAt,
+        profileName: entry.profileName,
+        patient: {
+            medicalCardNumber: entry.medicalCardNumber || '',
+            fullName: '',
+            birthDate: '',
+            appointmentDate: new Date(entry.createdAt || Date.now()).toISOString().slice(0, 10)
+        },
+        medications: normalizeMedications(entry.medications),
+        analyses: Array.isArray(entry.analyses) ? entry.analyses : []
+    };
+}
+
+async function renderJournalPanel() {
+    const panel = document.getElementById('journalPanel');
+    const list = document.getElementById('journalList');
+    if (!panel || !list) {
+        return;
+    }
+
+    const entries = await getJournalEntries();
+    list.textContent = '';
+
+    if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Журнал пуст';
+        list.appendChild(empty);
+    }
+
+    for (const entry of entries) {
+        const row = document.createElement('div');
+        row.className = 'journal-row';
+
+        const info = document.createElement('div');
+        info.className = 'journal-row-info';
+        const dateText = new Date(entry.createdAt).toLocaleString('ru-RU');
+        info.textContent = `${dateText} · карта ${entry.medicalCardNumber || 'не указана'} · ${entry.profileName}`;
+
+        const openButton = document.createElement('button');
+        openButton.type = 'button';
+        openButton.className = 'small-btn';
+        openButton.textContent = 'Открыть лист';
+        openButton.addEventListener('click', () => openPrintPayload(buildPayloadFromJournalEntry(entry)));
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'small-btn danger-mini';
+        deleteButton.textContent = 'Удалить';
+        deleteButton.addEventListener('click', async () => {
+            await deleteJournalEntry(entry.id);
+            renderJournalPanel();
+        });
+
+        row.append(info, openButton, deleteButton);
+        list.appendChild(row);
+    }
+
+    panel.classList.remove('hidden');
+}
+
+function closeJournalPanel() {
+    document.getElementById('journalPanel')?.classList.add('hidden');
+}
+
+function readPatientDataFromBarsPage() {
+    const normalizeSpaces = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const cleanValue = (value) => normalizeSpaces(value)
+        .replace(/^(фио|ф\.и\.о\.|пациент|дата рождения|д\/р|др|№\s*мед(?:ицинской)?\s*карты|номер\s*карты|медкарта|карта)\s*[:№\-]?\s*/i, '')
+        .trim();
+    const visibleText = normalizeSpaces(document.body?.innerText || document.body?.textContent || '');
+    const getHeaderPatientData = () => {
+        const match = visibleText.match(/([А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+){1,3})\s*,\s*(\d{1,2}[./-]\d{1,2}[./-]\d{4})\s*,\s*№\s*карты\s*(\d{6,})/i);
+        return {
+            fullName: match?.[1] || '',
+            birthDate: match?.[2] || '',
+            medicalCardNumber: match?.[3] || ''
+        };
+    };
+    const headerPatientData = getHeaderPatientData();
+    const isVisible = (element) => {
+        if (!element) {
+            return false;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0
+            && rect.height > 0
+            && style.visibility !== 'hidden'
+            && style.display !== 'none';
+    };
+    const getCaptionValues = (caption) => Array.from(document.querySelectorAll(`[data="caption:${caption}"]`))
+        .map((element) => ({
+            value: cleanValue(element.value || element.innerText || element.textContent || ''),
+            visible: isVisible(element)
+        }))
+        .filter((item) => item.value)
+        .sort((left, right) => Number(right.visible) - Number(left.visible))
+        .map((item) => item.value);
+    const getCaptionValue = (caption, accept = (value) => !!value) => {
+        const values = getCaptionValues(caption);
+        return values.find(accept) || '';
+    };
+    const getDirectCaptionValue = (caption) => {
+        const visibleElement = Array.from(document.querySelectorAll(`[data="caption:${caption}"]`))
+            .filter(isVisible)
+            .find((element) => cleanValue(element.value || element.innerText || element.textContent || ''));
+        const element = visibleElement || document.querySelector(`[data="caption:${caption}"]`);
+        return cleanValue(element?.value || element?.innerText || element?.textContent || '');
+    };
+    const normalizeCardNumber = (value) => {
+        const match = String(value || '').match(/\b\d{6,}\b/);
+        return match ? match[0] : '';
+    };
+    const normalizeFullName = (value) => {
+        const cleaned = cleanValue(value)
+            .replace(/\s*,.*$/, '')
+            .replace(/^(заказ|история|болезни|исследований|исследование|пациент|карты|медицинская|информационная|система)\s+/i, '')
+            .trim();
+
+        if (/[{}();=]|\b(Form|function|return|var|const|let|D3Api)\b/i.test(cleaned)) {
+            return '';
+        }
+
+        const words = cleaned.match(/[А-ЯЁ][а-яё-]+/g) || [];
+        if (words.length >= 2 && words.length <= 4) {
+            return words.join(' ');
+        }
+
+        const match = cleaned.match(/\b[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+){1,3}\b/);
+        return match ? match[0] : '';
+    };
+
+    const inputValueByHints = (hints) => {
+        const controls = Array.from(document.querySelectorAll('input, textarea, select'));
+        for (const control of controls) {
+            const getExternalLabel = () => {
+                if (!control.id) {
+                    return '';
+                }
+
+                try {
+                    return document.querySelector(`label[for="${control.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`)?.innerText || '';
+                } catch (error) {
+                    return '';
+                }
+            };
+            const containerText = normalizeSpaces(
+                control.closest('tr, [role="row"], .row, .form-group, .field, .control, .input-group, td, div')?.innerText || ''
+            );
+            const marker = normalizeSpaces([
+                control.id,
+                control.name,
+                control.placeholder,
+                control.title,
+                control.getAttribute('aria-label'),
+                control.closest('label')?.innerText,
+                getExternalLabel(),
+                containerText
+            ].filter(Boolean).join(' ')).toLowerCase();
+
+            if (hints.some((hint) => marker.includes(hint))) {
+                const value = cleanValue(control.value || control.textContent);
+                if (value) {
+                    return value;
+                }
+            }
+        }
+        return '';
+    };
+
+    const textAfterLabel = (labels) => {
+        for (const label of labels) {
+            const pattern = new RegExp(`${label}\\s*[:\\-]?\\s*([^\\n\\r]{3,120})`, 'i');
+            const match = visibleText.match(pattern);
+            if (match?.[1]) {
+                return cleanValue(match[1]);
+            }
+        }
+        return '';
+    };
+
+    const findMedicalCardNumber = () => {
+        if (headerPatientData.medicalCardNumber) {
+            return headerPatientData.medicalCardNumber;
+        }
+
+        const fromCaption = getCaptionValue('CARD_NUMB', (value) => !!normalizeCardNumber(value));
+        const captionCard = normalizeCardNumber(fromCaption);
+        if (captionCard) {
+            return captionCard;
+        }
+
+        const fromInput = inputValueByHints([
+            'медицинской карты',
+            'медкарта',
+            'номер карты',
+            '№ карты',
+            'card',
+            'history',
+            'case'
+        ]);
+        const inputCard = normalizeCardNumber(fromInput);
+        if (inputCard) {
+            return inputCard;
+        }
+
+        const fromText = textAfterLabel([
+            '№\\s*мед(?:ицинской)?\\s*карты',
+            'Номер\\s*мед(?:ицинской)?\\s*карты',
+            'Мед(?:ицинская)?\\s*карта',
+            'Медкарта',
+            'Карта'
+        ]);
+        const textCard = normalizeCardNumber(fromText);
+        if (textCard) {
+            return textCard;
+        }
+
+        const nearbyCard = visibleText.match(/(?:№\s*мед(?:ицинской)?\s*карты|номер\s*мед(?:ицинской)?\s*карты|медкарта|карта)\D{0,20}(\d{6,})/i);
+        return nearbyCard?.[1] || '';
+    };
+
+    const findFullName = () => {
+        if (headerPatientData.fullName) {
+            return headerPatientData.fullName;
+        }
+
+        const directCaptionName = normalizeFullName(getDirectCaptionValue('FIO'));
+        if (directCaptionName) {
+            return directCaptionName;
+        }
+
+        const fromCaption = getCaptionValue('FIO', (value) => !!normalizeFullName(value));
+        const captionName = normalizeFullName(fromCaption);
+        if (captionName) {
+            return captionName;
+        }
+
+        const patientBlockText = normalizeSpaces(document.querySelector('[name="PatientSelect"], .pat_sub_patient_select')?.innerText || '');
+        const blockName = normalizeFullName(patientBlockText);
+        if (blockName) {
+            return blockName;
+        }
+
+        const fromInput = inputValueByHints(['фио', 'ф.и.о', 'пациент', 'patient', 'fullname']);
+        const inputName = normalizeFullName(fromInput);
+        if (inputName) {
+            return inputName;
+        }
+
+        const fromText = textAfterLabel(['Ф\\.И\\.О\\.', 'ФИО', 'Пациент']);
+        if (fromText) {
+            const compact = normalizeFullName(fromText
+                .replace(/\b(пол|возраст|дата рождения|д\/р|др|№|номер)\b.*$/i, '')
+                .trim());
+            if (compact) {
+                return compact;
+            }
+        }
+
+        return normalizeFullName(visibleText);
+    };
+
+    const findBirthDate = () => {
+        if (headerPatientData.birthDate) {
+            return headerPatientData.birthDate;
+        }
+
+        const fromCaption = getCaptionValue('BIRTHDATE', (value) => /\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/.test(value));
+        if (fromCaption) {
+            return fromCaption;
+        }
+
+        const fromInput = inputValueByHints(['дата рождения', 'birth', 'birthday', 'др', 'д/р']);
+        const inputDate = fromInput.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/);
+        if (inputDate) {
+            return inputDate[0];
+        }
+
+        const fromText = textAfterLabel(['Дата рождения', 'Д\\/р', 'ДР']);
+        const textDate = fromText.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/);
+        if (textDate) {
+            return textDate[0];
+        }
+
+        const nearbyDate = visibleText.match(/(?:Дата рождения|Д\/р|ДР)\D{0,30}(\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{4}-\d{2}-\d{2})/i);
+        return nearbyDate?.[1] || '';
+    };
+
+    return {
+        medicalCardNumber: findMedicalCardNumber(),
+        fullName: findFullName(),
+        birthDate: findBirthDate()
+    };
+}
+
+function switchProfileEditorTab(tabName) {
+    activeProfileEditorTab = tabName === 'medications' ? 'medications' : 'analyses';
+
+    document.querySelectorAll('.editor-tab').forEach((button) => {
+        button.classList.toggle('active', button.dataset.tab === activeProfileEditorTab);
+    });
+
+    document.querySelectorAll('.editor-tab-panel').forEach((panel) => {
+        panel.classList.toggle('hidden', panel.dataset.panel !== activeProfileEditorTab);
+    });
+}
+
+function getMedicationFormValues(prefix = 'medication') {
+    return {
+        id: document.getElementById(`${prefix}Id`)?.value || '',
+        source: document.getElementById(`${prefix}Source`)?.value || 'manual',
+        atc: document.getElementById(`${prefix}Atc`)?.value || '',
+        name: document.getElementById(`${prefix}Name`)?.value || '',
+        form: document.getElementById(`${prefix}Form`)?.value || '',
+        dose: document.getElementById(`${prefix}Dose`)?.value || '',
+        route: document.getElementById(`${prefix}Route`)?.value || '',
+        frequency: document.getElementById(`${prefix}Frequency`)?.value || '',
+        duration: document.getElementById(`${prefix}Duration`)?.value || '',
+        regimen: document.getElementById(`${prefix}Regimen`)?.value || '',
+        comment: document.getElementById(`${prefix}Comment`)?.value || ''
+    };
+}
+
+function setMedicationFormValues(medication = {}, prefix = 'medication') {
+    const normalized = normalizeMedication(medication) || {
+        id: '',
+        source: 'manual',
+        atc: '',
+        name: '',
+        form: '',
+        dose: '',
+        route: '',
+        frequency: '',
+        duration: '',
+        regimen: '',
+        comment: ''
+    };
+
+    for (const [field, value] of Object.entries({
+        Id: normalized.id,
+        Source: normalized.source,
+        Atc: normalized.atc,
+        Name: normalized.name,
+        Form: normalized.form,
+        Dose: normalized.dose,
+        Route: normalized.route,
+        Frequency: normalized.frequency,
+        Duration: normalized.duration,
+        Regimen: normalized.regimen,
+        Comment: normalized.comment
+    })) {
+        const element = document.getElementById(`${prefix}${field}`);
+        if (element) {
+            element.value = value;
+        }
+    }
+}
+
+function clearMedicationForm() {
+    setMedicationFormValues();
+    const saveButton = document.getElementById('addMedicationToProfile');
+    if (saveButton) {
+        saveButton.textContent = 'Добавить препарат в профиль';
+    }
+}
+
+function fillMedicationFromCatalog(drug, form = '') {
+    setMedicationFormValues({
+        id: drug.id,
+        source: 'catalog',
+        atc: drug.atc,
+        name: drug.name,
+        form,
+        dose: '',
+        route: '',
+        frequency: '',
+        duration: '',
+        regimen: '',
+        comment: ''
+    });
+}
+
+function renderDrugCatalogSearch() {
+    const list = document.getElementById('drugCatalogList');
+    const searchInput = document.getElementById('drugSearch');
+    if (!list || !searchInput) {
+        return;
+    }
+
+    const query = searchInput.value.trim().toLowerCase();
+    list.textContent = '';
+
+    if (!query) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Введите название или АТХ для поиска препарата';
+        list.appendChild(empty);
+        return;
+    }
+
+    const results = getDrugCatalog()
+        .filter((drug) => `${drug.name} ${drug.atc} ${drug.group}`.toLowerCase().includes(query))
+        .slice(0, 25);
+
+    if (results.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Препарат не найден. Добавьте его вручную ниже.';
+        list.appendChild(empty);
+        return;
+    }
+
+    for (const drug of results) {
+        const item = document.createElement('div');
+        item.className = 'drug-result';
+
+        const header = document.createElement('div');
+        header.className = 'drug-result-title';
+        header.textContent = `${drug.name}${drug.atc ? ` (${drug.atc})` : ''}`;
+
+        const group = document.createElement('div');
+        group.className = 'drug-result-group';
+        group.textContent = drug.group;
+
+        const forms = document.createElement('div');
+        forms.className = 'drug-result-forms';
+
+        const formValues = drug.forms.length ? drug.forms : [''];
+        for (const form of formValues) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'small-btn';
+            button.textContent = form || 'Выбрать';
+            button.addEventListener('click', () => fillMedicationFromCatalog(drug, form));
+            forms.appendChild(button);
+        }
+
+        item.append(header, group, forms);
+        list.appendChild(item);
+    }
+}
+
+function renderSelectedMedications() {
+    const list = document.getElementById('profileMedicationList');
+    const counter = document.getElementById('selectedMedicationCounter');
+    if (!list || !counter) {
+        return;
+    }
+
+    list.textContent = '';
+    counter.textContent = `Выбрано: ${selectedMedications.length}`;
+
+    if (selectedMedications.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Препараты в профиль пока не добавлены';
+        list.appendChild(empty);
+        return;
+    }
+
+    selectedMedications.forEach((medication, index) => {
+        const row = document.createElement('div');
+        row.className = 'medication-row';
+
+        const text = document.createElement('div');
+        text.className = 'medication-row-text';
+        text.textContent = medicationToText(medication);
+
+        const controls = document.createElement('div');
+        controls.className = 'medication-row-actions';
+
+        const upButton = document.createElement('button');
+        upButton.type = 'button';
+        upButton.className = 'small-btn';
+        upButton.textContent = '↑';
+        upButton.disabled = index === 0;
+        upButton.addEventListener('click', () => {
+            [selectedMedications[index - 1], selectedMedications[index]] = [selectedMedications[index], selectedMedications[index - 1]];
+            renderSelectedMedications();
+        });
+
+        const downButton = document.createElement('button');
+        downButton.type = 'button';
+        downButton.className = 'small-btn';
+        downButton.textContent = '↓';
+        downButton.disabled = index === selectedMedications.length - 1;
+        downButton.addEventListener('click', () => {
+            [selectedMedications[index + 1], selectedMedications[index]] = [selectedMedications[index], selectedMedications[index + 1]];
+            renderSelectedMedications();
+        });
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'small-btn';
+        editButton.textContent = 'Ред.';
+        editButton.addEventListener('click', () => {
+            setMedicationFormValues(medication);
+            document.getElementById('addMedicationToProfile').textContent = 'Обновить препарат';
+            switchProfileEditorTab('medications');
+        });
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'small-btn danger-mini';
+        deleteButton.textContent = 'Удалить';
+        deleteButton.addEventListener('click', () => {
+            selectedMedications.splice(index, 1);
+            renderSelectedMedications();
+        });
+
+        controls.append(upButton, downButton, editButton, deleteButton);
+        row.append(text, controls);
+        list.appendChild(row);
+    });
+}
+
+function addMedicationFromEditor() {
+    const rawMedication = getMedicationFormValues();
+    if (!rawMedication.id) {
+        rawMedication.id = rawMedication.source === 'catalog'
+            ? rawMedication.name
+            : generateId('custom');
+    }
+
+    const medication = normalizeMedication(rawMedication);
+    if (!medication) {
+        setStatus('❌ Укажите название препарата', '#f44336');
+        return;
+    }
+
+    const existingIndex = selectedMedications.findIndex((item) => item.id === medication.id);
+    if (existingIndex >= 0) {
+        selectedMedications[existingIndex] = medication;
+    } else {
+        selectedMedications.push(medication);
+    }
+
+    renderSelectedMedications();
+    clearMedicationForm();
+}
+
+function saveManualDrugToCatalog() {
+    const medication = normalizeMedication(getMedicationFormValues());
+    if (!medication) {
+        setStatus('❌ Укажите название препарата для справочника', '#f44336');
+        return;
+    }
+
+    const customCatalog = getCustomDrugCatalog();
+    const id = medication.atc
+        ? `${medication.atc}-${medication.name.toLowerCase().replace(/\s+/g, '-')}`
+        : `custom-${medication.name.toLowerCase().replace(/\s+/g, '-')}`;
+    const existingIndex = customCatalog.findIndex((drug) => drug.id === id);
+    const nextDrug = {
+        id,
+        atc: medication.atc,
+        group: 'Пользовательский справочник',
+        name: medication.name,
+        forms: medication.form ? [medication.form] : []
+    };
+
+    if (existingIndex >= 0) {
+        customCatalog[existingIndex] = {
+            ...customCatalog[existingIndex],
+            forms: Array.from(new Set([...customCatalog[existingIndex].forms, ...nextDrug.forms]))
+        };
+    } else {
+        customCatalog.push(nextDrug);
+    }
+
+    saveCustomDrugCatalog(customCatalog);
+    renderDrugCatalogSearch();
+    setStatus('✅ Препарат сохранён в пользовательский справочник');
+}
+
 function openSettingsPanel() {
     document.getElementById('settingsPanel').classList.remove('hidden');
     renderTemplateLibraryList();
@@ -559,23 +1637,31 @@ async function openProfileEditor(profileName = null) {
     if (profileName) {
         const profileLibrary = getTemplateLibrary();
         const profileTitle = splitProfileTitle(profileName);
+        const profile = normalizeProfile(profileLibrary[profileName]);
         selectedProfileIcon = profileTitle.icon;
-        selectedResearchIds = new Set(Object.keys(profileLibrary[profileName] || {}));
+        selectedResearchIds = new Set(Object.keys(profile.analyses));
+        selectedMedications = [...profile.medications];
         nameInput.value = profileTitle.name;
         title.textContent = 'Редактирование профиля';
         saveButton.textContent = 'Сохранить назначение';
     } else {
         selectedProfileIcon = PROFILE_ICONS[0];
         selectedResearchIds = new Set();
+        selectedMedications = [];
         nameInput.value = '';
         title.textContent = 'Новое назначение';
         saveButton.textContent = 'Добавить назначение';
     }
 
     document.getElementById('researchSearch').value = '';
+    document.getElementById('drugSearch').value = '';
+    clearMedicationForm();
     editor.classList.remove('hidden');
+    switchProfileEditorTab('analyses');
     renderIconPicker();
     renderResearchList();
+    renderDrugCatalogSearch();
+    renderSelectedMedications();
 
     await loadResearchesForEditor();
 }
@@ -583,6 +1669,7 @@ async function openProfileEditor(profileName = null) {
 function closeProfileEditor() {
     editingProfileName = null;
     selectedResearchIds = new Set();
+    selectedMedications = [];
     document.getElementById('profileEditor').classList.add('hidden');
 }
 
@@ -595,8 +1682,8 @@ function saveProfileFromEditor() {
         return;
     }
 
-    if (selectedResearchIds.size === 0) {
-        setStatus('❌ Выберите хотя бы одно исследование', '#f44336');
+    if (selectedResearchIds.size === 0 && selectedMedications.length === 0) {
+        setStatus('❌ Выберите хотя бы одно исследование или препарат', '#f44336');
         return;
     }
 
@@ -621,7 +1708,10 @@ function saveProfileFromEditor() {
         activeProfileNames.delete(editingProfileName);
     }
 
-    customProfiles[newTitle] = analyses;
+    customProfiles[newTitle] = {
+        analyses,
+        medications: normalizeMedications(selectedMedications)
+    };
     activeProfileNames.add(newTitle);
     saveCustomProfiles(customProfiles);
     saveActiveProfileNames(Array.from(activeProfileNames));
@@ -659,7 +1749,8 @@ function getPortableConfig() {
         templates: normalizeProfiles(getTemplateLibrary()),
         activeProfiles: getActiveProfileNames(),
         settings: getAssignmentSettings(),
-        researchCatalog: getResearchCatalog()
+        researchCatalog: getResearchCatalog(),
+        customDrugCatalog: getCustomDrugCatalog()
     };
 }
 
@@ -686,17 +1777,20 @@ function importConfigObject(config) {
         : normalizeProfileNameList(Object.keys(importedTemplates), importedTemplates);
     const importedSettings = normalizeAssignmentSettings(config?.settings || {});
     const importedCatalog = getNormalizedResearchCatalog(config?.researchCatalog || {});
+    const importedCustomDrugCatalog = normalizeDrugCatalog(config?.customDrugCatalog || config?.drugCatalog || []);
 
     saveCustomProfiles(importedTemplates);
     saveActiveProfileNames(importedActiveProfiles);
     saveResearchCatalog(importedCatalog);
     saveAssignmentSettings(importedSettings);
+    saveCustomDrugCatalog(importedCustomDrugCatalog);
 
     refreshProfiles();
     loadedResearches = loadSavedResearches();
     populateProfileSelect();
     renderTemplateLibraryList();
     renderProfileManagerList();
+    renderDrugCatalogSearch();
     updateAssignmentStageUi();
     closeProfileEditor();
     setStatus('✅ Настройки импортированы');
@@ -1162,10 +2256,14 @@ function saveScenarioSettingsFromUi() {
     const slider = document.getElementById('assignmentStageSlider');
     const targetCabinetInput = document.getElementById('targetCabinetInput');
     const markUrgentCheckbox = document.getElementById('markUrgentCheckbox');
+    const journalEnabledCheckbox = document.getElementById('journalEnabledCheckbox');
+    const journalRetentionInput = document.getElementById('journalRetentionDays');
     const settings = saveAssignmentSettings({
         assignmentStage: slider?.value === '1' ? ASSIGNMENT_STAGE_SCHEDULE : ASSIGNMENT_STAGE_ANALYSES,
         targetCabinet: targetCabinetInput?.value || '',
-        markUrgent: markUrgentCheckbox?.checked === true
+        markUrgent: markUrgentCheckbox?.checked === true,
+        journalEnabled: journalEnabledCheckbox?.checked !== false,
+        journalRetentionDays: journalRetentionInput?.value || DEFAULT_JOURNAL_RETENTION_DAYS
     });
 
     updateAssignmentStageUi(settings);
@@ -1174,11 +2272,17 @@ function saveScenarioSettingsFromUi() {
 // Заполняем выпадающий список профилями
 document.addEventListener('DOMContentLoaded', async () => {
     applyExtensionConfig(await loadExtensionConfigFile());
+    CONFIG_DRUG_CATALOG = normalizeDrugCatalog([
+        ...CONFIG_DRUG_CATALOG,
+        ...await loadDrugCatalogFile()
+    ]);
     refreshProfiles();
     populateProfileSelect();
     renderTemplateLibraryList();
     renderProfileManagerList();
     updateAssignmentStageUi();
+    document.getElementById('appointmentDate').value = new Date().toISOString().slice(0, 10);
+    cleanupOldJournalEntries().catch((error) => console.warn('Не удалось очистить журнал назначений', error));
 
     document.getElementById('settingsToggle').addEventListener('click', openSettingsPanel);
     document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);
@@ -1187,9 +2291,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('saveProfile').addEventListener('click', saveProfileFromEditor);
     document.getElementById('loadResearches').addEventListener('click', loadResearchesForEditor);
     document.getElementById('researchSearch').addEventListener('input', renderResearchList);
+    document.querySelectorAll('.editor-tab').forEach((button) => {
+        button.addEventListener('click', () => switchProfileEditorTab(button.dataset.tab));
+    });
+    document.getElementById('drugSearch').addEventListener('input', renderDrugCatalogSearch);
+    document.getElementById('addMedicationToProfile').addEventListener('click', addMedicationFromEditor);
+    document.getElementById('clearMedicationForm').addEventListener('click', clearMedicationForm);
+    document.getElementById('saveManualDrug').addEventListener('click', saveManualDrugToCatalog);
     document.getElementById('assignmentStageSlider').addEventListener('input', saveScenarioSettingsFromUi);
     document.getElementById('targetCabinetInput').addEventListener('input', saveScenarioSettingsFromUi);
     document.getElementById('markUrgentCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
+    document.getElementById('journalEnabledCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
+    document.getElementById('journalRetentionDays').addEventListener('change', saveScenarioSettingsFromUi);
+    document.getElementById('pullPatientFromBars').addEventListener('click', pullPatientFromBarsPage);
+    document.getElementById('openPrintSheet').addEventListener('click', openPrintSheetForSelectedProfile);
+    document.getElementById('saveJournalEntry').addEventListener('click', () => {
+        saveSelectedProfileToJournal().catch((error) => {
+            console.error('Не удалось сохранить журнал назначений', error);
+            setStatus('❌ Не удалось сохранить журнал', '#f44336');
+        });
+    });
+    document.getElementById('openJournal').addEventListener('click', () => {
+        renderJournalPanel().catch((error) => {
+            console.error('Не удалось открыть журнал назначений', error);
+            setStatus('❌ Не удалось открыть журнал', '#f44336');
+        });
+    });
+    document.getElementById('closeJournal').addEventListener('click', closeJournalPanel);
+    document.getElementById('clearJournalNow').addEventListener('click', async () => {
+        if (!confirm('Очистить локальный журнал назначений сейчас?')) {
+            return;
+        }
+        await clearJournal();
+        renderJournalPanel();
+        setStatus('✅ Журнал очищен');
+    });
     document.getElementById('exportConfig').addEventListener('click', exportConfigFile);
     document.getElementById('importConfig').addEventListener('click', () => document.getElementById('importConfigFile').click());
     document.getElementById('importConfigFile').addEventListener('change', (event) => {
@@ -1223,7 +2359,7 @@ document.getElementById('fillForm').addEventListener('click', () => {
     
     localStorage.setItem('lastSelectedProfile', selectedProfile);
     
-    const formData = PROFILES[selectedProfile];
+    const formData = getProfileAnalyses(PROFILES[selectedProfile]);
     const assignmentSettings = getAssignmentSettings();
     statusDiv.textContent = '⏳ Заполнение...';
     statusDiv.style.color = '#ff9800';

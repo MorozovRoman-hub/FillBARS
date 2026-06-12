@@ -1,164 +1,529 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <title>МИС БАРС - назначения</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            width: 340px;
-            padding: 15px;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f5f5f5;
+            width: 430px;
+            padding: 14px;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f6f8;
+            color: #24313d;
             margin: 0;
         }
+
+        h3, h4 {
+            margin: 0;
+        }
+
         h3 {
-            margin: 0 0 10px 0;
-            color: #333;
             font-size: 16px;
             text-align: center;
-            border-bottom: 1px solid #ddd;
             padding-bottom: 8px;
+            border-bottom: 1px solid #d8dee5;
         }
-        .warning {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 10px;
-            margin-bottom: 15px;
-            font-size: 12px;
-            border-radius: 4px;
-            color: #856404;
-        }
-        .warning strong {
-            display: block;
-            margin-bottom: 5px;
+
+        h4 {
             font-size: 13px;
+            margin-bottom: 8px;
         }
-        .warning ul {
-            margin: 5px 0 0 20px;
-            padding: 0;
-        }
-        .warning li {
-            margin: 3px 0;
-        }
-        .profile-selector {
-            margin-bottom: 15px;
-        }
+
         label {
             display: block;
             margin-bottom: 5px;
+            font-size: 12px;
             font-weight: 600;
-            color: #555;
+            color: #4a5a68;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 9px;
+            border: 1px solid #c8d1da;
+            border-radius: 4px;
+            background: #fff;
+            font: inherit;
             font-size: 13px;
         }
-        select {
-            width: 100%;
-            padding: 8px 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background-color: white;
-            font-size: 14px;
-            cursor: pointer;
-            box-sizing: border-box;
+
+        textarea {
+            min-height: 54px;
+            resize: vertical;
         }
-        select:focus {
-            outline: none;
-            border-color: #4CAF50;
-        }
+
         button {
             width: 100%;
             padding: 10px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
+            border: 0;
             border-radius: 4px;
-            font-size: 14px;
-            font-weight: 600;
+            background: #2f8f5b;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 700;
             cursor: pointer;
-            transition: background-color 0.2s;
-            margin-bottom: 8px;
         }
+
         button:hover {
-            background-color: #45a049;
+            background: #287d4f;
         }
-        button:active {
-            transform: scale(0.98);
+
+        button:disabled {
+            opacity: .55;
+            cursor: default;
         }
-        .close-btn {
-            background-color: #f44336;
+
+        .danger, .close-btn {
+            background: #cc3d35;
         }
-        .close-btn:hover {
-            background-color: #da190b;
+
+        .danger:hover, .close-btn:hover {
+            background: #a9312b;
         }
-        .info {
+
+        .secondary {
+            background: #4b657d;
+        }
+
+        .secondary:hover {
+            background: #3e5367;
+        }
+
+        .ghost {
+            background: #eef3f7;
+            color: #314151;
+            border: 1px solid #c8d1da;
+        }
+
+        .ghost:hover {
+            background: #e2eaf1;
+        }
+
+        .small-btn {
+            width: auto;
+            padding: 5px 8px;
+            margin: 0;
             font-size: 11px;
-            color: #888;
-            text-align: center;
-            margin-top: 12px;
-            padding-top: 8px;
-            border-top: 1px solid #ddd;
+            line-height: 1.2;
+            white-space: nowrap;
         }
+
+        .danger-mini {
+            background: #c74840;
+        }
+
+        .section {
+            padding: 10px 0;
+            border-bottom: 1px solid #d8dee5;
+        }
+
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .full {
+            grid-column: 1 / -1;
+        }
+
+        .button-stack {
+            display: grid;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .warning {
+            margin-top: 10px;
+            padding: 9px;
+            border-left: 4px solid #d4a62b;
+            background: #fff8e1;
+            color: #6a4b00;
+            font-size: 11px;
+            line-height: 1.35;
+        }
+
         .status {
+            min-height: 30px;
+            padding-top: 8px;
+            text-align: center;
             font-size: 12px;
-            color: #4CAF50;
-            text-align: center;
-            margin-top: 8px;
-            min-height: 32px;
+            color: #2f8f5b;
         }
-        .author {
+
+        .settings-button {
+            margin-top: 9px;
+        }
+
+        .panel {
+            position: fixed;
+            inset: 0;
+            z-index: 5;
+            padding: 14px;
+            overflow: auto;
+            background: #f4f6f8;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .panel-header {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .panel-header button {
+            width: auto;
+        }
+
+        .profile-row, .template-row, .journal-row, .medication-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            padding: 7px 0;
+            border-bottom: 1px solid #dde4eb;
+        }
+
+        .profile-row-name, .journal-row-info, .medication-row-text {
+            flex: 1;
+            min-width: 0;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .icon-picker {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+
+        .icon-choice {
+            padding: 5px 0;
+            background: #fff;
+            color: #1e2a35;
+            border: 1px solid #c8d1da;
+        }
+
+        .icon-choice.selected {
+            border-color: #2f8f5b;
+            background: #dff1e6;
+        }
+
+        .editor-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin: 10px 0;
+        }
+
+        .editor-tab {
+            background: #eef3f7;
+            color: #314151;
+            border: 1px solid #c8d1da;
+        }
+
+        .editor-tab.active {
+            background: #2f8f5b;
+            color: #fff;
+            border-color: #2f8f5b;
+        }
+
+        .scroll-list {
+            max-height: 230px;
+            overflow: auto;
+            border: 1px solid #d8dee5;
+            background: #fff;
+            padding: 7px;
+            border-radius: 4px;
+        }
+
+        .research-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            padding: 5px 0;
+            font-weight: 400;
+        }
+
+        .research-row input, .template-row input {
+            width: auto;
+            margin-top: 2px;
+        }
+
+        .drug-result {
+            padding: 7px 0;
+            border-bottom: 1px solid #e2e8ee;
+        }
+
+        .drug-result-title {
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .drug-result-group {
+            margin-top: 2px;
+            color: #667684;
+            font-size: 11px;
+        }
+
+        .drug-result-forms {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 6px;
+        }
+
+        .medication-row {
+            align-items: flex-start;
+        }
+
+        .medication-row-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            justify-content: flex-end;
+            max-width: 155px;
+        }
+
+        .empty-state, .hint {
+            color: #7b8996;
+            font-size: 11px;
+            line-height: 1.35;
+        }
+
+        .footer {
+            margin-top: 8px;
+            text-align: center;
+            color: #8d9aa6;
             font-size: 10px;
-            color: #aaa;
-            text-align: center;
+        }
+
+        .author {
             margin-top: 8px;
-            padding-top: 5px;
-            border-top: 1px solid #eee;
-        }
-        .version {
-            font-size: 9px;
-            color: #bbb;
+            padding-top: 6px;
+            border-top: 1px solid #d8dee5;
             text-align: center;
-            margin-top: 4px;
+            color: #7b8996;
+            font-size: 10px;
         }
-        .warning-icon {
-            font-size: 14px;
-            margin-right: 5px;
+
+        .version {
+            margin-top: 4px;
+            text-align: center;
+            color: #9aa6b2;
+            font-size: 9px;
         }
     </style>
-    <title>МИС БАРС - Автоназначение анализов</title>
 </head>
 <body>
-    <h3>📋 Назначение анализов</h3>
-    
+    <h3>📋 FillBARS - назначения</h3>
+
     <div class="warning">
-        <strong>⚠️ Важное предупреждение!</strong>
-        Перед использованием расширения убедитесь, что отображаются ВСЕ анализы:
-        <ul>
-            <li>Нажмите на цифру в правом нижнем углу (20, 50 и т.д.)</li>
-            <li>В выпадающем списке введите <strong>150</strong> и нажмите Enter</li>
-            <li>Дождитесь загрузки всех анализов</li>
-        </ul>
-        Только после этого нажимайте "Заполнить форму"!
+        Перед назначением анализов убедитесь, что в БАРС отображаются все нужные исследования. Расширение не нажимает финальную кнопку записи.
     </div>
-    
-    <div class="profile-selector">
-        <label>Выберите профиль назначений:</label>
+
+    <div class="section">
+        <label for="profileSelect">Профиль назначений</label>
         <select id="profileSelect">
             <option value="">-- Выберите профиль --</option>
         </select>
+        <button id="settingsToggle" class="settings-button ghost" type="button">⚙ Настройки и профили</button>
     </div>
-    
-    <button id="fillForm">✅ Заполнить форму</button>
-    <button id="closePopup" class="close-btn">✖ Закрыть</button>
-    
+
+    <div class="section">
+        <h4>Данные для печатного листа</h4>
+        <div class="field-grid">
+            <div>
+                <label for="appointmentDate">Дата назначения</label>
+                <input id="appointmentDate" type="date">
+            </div>
+            <div class="full">
+                <label for="patientFullName">ФИО пациента</label>
+                <input id="patientFullName" type="text" autocomplete="off">
+            </div>
+            <div>
+                <label for="patientBirthDate">Дата рождения</label>
+                <input id="patientBirthDate" type="date">
+            </div>
+            <div class="full">
+                <button id="pullPatientFromBars" class="ghost" type="button">↙ Подтянуть ФИО и дату рождения из БАРС</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="button-stack">
+        <button id="fillForm" type="button">✅ Заполнить форму БАРС</button>
+        <button id="openPrintSheet" class="secondary" type="button">🖨 Открыть лист назначений</button>
+        <button id="saveJournalEntry" class="secondary" type="button">💾 Сохранить в журнал</button>
+        <button id="openJournal" class="ghost" type="button">📚 Журнал назначений</button>
+        <button id="closePopup" class="close-btn" type="button">✖ Закрыть</button>
+    </div>
+
     <div id="status" class="status"></div>
-    
-    <div class="info">
-        ⚡ Автоматическое назначение анализов в МИС БАРС
+    <div class="footer">Все данные обрабатываются локально внутри расширения</div>
+    <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
+    <div class="version">Версия 4.0 | Для медицинских информационных систем</div>
+
+    <div id="settingsPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>⚙ Настройки</h3>
+            <button id="closeSettings" class="small-btn danger" type="button">Закрыть</button>
+        </div>
+
+        <div class="section">
+            <h4>Сценарий назначения в БАРС</h4>
+            <label for="assignmentStageSlider">Этап выполнения: <span id="assignmentStageText"></span></label>
+            <input id="assignmentStageSlider" type="range" min="0" max="1" step="1">
+            <div class="hint" id="assignmentStageHint"></div>
+            <label for="targetCabinetInput">Кабинет для записи</label>
+            <input id="targetCabinetInput" type="text" placeholder="Например: процедурный кабинет">
+            <label class="research-row">
+                <input id="markUrgentCheckbox" type="checkbox">
+                <span>Отмечать «Срочно» при выборе кабинетов</span>
+            </label>
+        </div>
+
+        <div class="section">
+            <h4>Хранение журнала назначений</h4>
+            <label class="research-row">
+                <input id="journalEnabledCheckbox" type="checkbox">
+                <span>Сохранять журнал назначений локально</span>
+            </label>
+            <label for="journalRetentionDays">Срок хранения, дней</label>
+            <input id="journalRetentionDays" type="number" min="1" max="365" value="60">
+            <button id="clearJournalNow" class="danger settings-button" type="button">Очистить журнал сейчас</button>
+            <div class="warning">
+                В журнале сохраняются только техническая запись и назначения. ФИО и дата рождения не сохраняются.
+            </div>
+        </div>
+
+        <div class="section">
+            <h4>Активные профили</h4>
+            <div id="profileManagerList"></div>
+            <button id="addProfile" class="settings-button" type="button">+ Добавить назначение</button>
+        </div>
+
+        <div class="section">
+            <h4>Библиотека профилей</h4>
+            <div id="templateLibraryList"></div>
+        </div>
+
+        <div class="section">
+            <h4>Импорт / экспорт</h4>
+            <div class="button-stack">
+                <button id="exportConfig" class="secondary" type="button">Экспорт настроек</button>
+                <button id="importConfig" class="secondary" type="button">Импорт настроек</button>
+                <input id="importConfigFile" type="file" accept="application/json" class="hidden">
+            </div>
+        </div>
+
+        <div id="profileEditor" class="section hidden">
+            <h4 id="editorTitle">Новое назначение</h4>
+            <label for="profileNameInput">Название профиля</label>
+            <input id="profileNameInput" type="text">
+            <label>Иконка</label>
+            <div id="iconPicker" class="icon-picker"></div>
+
+            <div class="editor-tabs">
+                <button class="editor-tab active" data-tab="analyses" type="button">Анализы</button>
+                <button class="editor-tab" data-tab="medications" type="button">Препараты</button>
+            </div>
+
+            <div class="editor-tab-panel" data-panel="analyses">
+                <div class="field-grid">
+                    <div class="full">
+                        <label for="researchSearch">Поиск анализа</label>
+                        <input id="researchSearch" type="search">
+                    </div>
+                </div>
+                <div id="selectedResearchCounter" class="hint"></div>
+                <div id="researchList" class="scroll-list"></div>
+                <button id="loadResearches" class="secondary settings-button" type="button">Обновить список с текущей страницы БАРС</button>
+                <div id="researchLoadStatus" class="hint"></div>
+            </div>
+
+            <div class="editor-tab-panel hidden" data-panel="medications">
+                <label for="drugSearch">Поиск препарата в справочнике</label>
+                <input id="drugSearch" type="search" placeholder="Название, АТХ или группа">
+                <div id="drugCatalogList" class="scroll-list"></div>
+
+                <h4 class="settings-button">Препарат в профиле</h4>
+                <input id="medicationId" type="hidden">
+                <input id="medicationSource" type="hidden" value="manual">
+                <div class="field-grid">
+                    <div>
+                        <label for="medicationAtc">АТХ</label>
+                        <input id="medicationAtc" type="text">
+                    </div>
+                    <div>
+                        <label for="medicationRoute">Путь введения</label>
+                        <input id="medicationRoute" type="text" placeholder="в/в, в/м, per os">
+                    </div>
+                    <div class="full">
+                        <label for="medicationName">Название</label>
+                        <input id="medicationName" type="text">
+                    </div>
+                    <div class="full">
+                        <label for="medicationForm">Лекарственная форма</label>
+                        <input id="medicationForm" type="text">
+                    </div>
+                    <div>
+                        <label for="medicationDose">Дозировка</label>
+                        <input id="medicationDose" type="text">
+                    </div>
+                    <div>
+                        <label for="medicationFrequency">Кратность</label>
+                        <input id="medicationFrequency" type="text">
+                    </div>
+                    <div>
+                        <label for="medicationDuration">Длительность</label>
+                        <input id="medicationDuration" type="text">
+                    </div>
+                    <div>
+                        <label for="medicationRegimen">Режим</label>
+                        <input id="medicationRegimen" type="text">
+                    </div>
+                    <div class="full">
+                        <label for="medicationComment">Комментарий</label>
+                        <input id="medicationComment" type="text">
+                    </div>
+                </div>
+                <div class="button-stack">
+                    <button id="addMedicationToProfile" type="button">Добавить препарат в профиль</button>
+                    <button id="saveManualDrug" class="secondary" type="button">Сохранить ручной препарат в справочник</button>
+                    <button id="clearMedicationForm" class="ghost" type="button">Очистить поля препарата</button>
+                </div>
+
+                <h4 class="settings-button">Препараты профиля</h4>
+                <div id="selectedMedicationCounter" class="hint"></div>
+                <div id="profileMedicationList" class="scroll-list"></div>
+            </div>
+
+            <div class="button-stack">
+                <button id="saveProfile" type="button">Сохранить назначение</button>
+                <button id="cancelEdit" class="ghost" type="button">Отмена</button>
+            </div>
+        </div>
     </div>
-    
-    <div class="author">
-        🧠 Идея и разработка: <strong>MorozovRV</strong>
-    </div>
-    <div class="version">
-        Версия 2.0 | Для медицинских информационных систем
+
+    <div id="journalPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>📚 Журнал назначений</h3>
+            <button id="closeJournal" class="small-btn danger" type="button">Закрыть</button>
+        </div>
+        <div class="warning">
+            Записи хранятся локально до 60 дней. ФИО и дата рождения в журнал не записываются.
+        </div>
+        <div id="journalList" class="section"></div>
     </div>
 
     <script src="popup.js"></script>
