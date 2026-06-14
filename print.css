@@ -38,12 +38,31 @@ body {
 }
 
 .sheet {
+    position: relative;
     width: 297mm;
     min-height: 210mm;
     margin: 14px auto;
     padding: 8mm;
     background: #fff;
     box-shadow: 0 0 14px rgba(0, 0, 0, .14);
+}
+
+.sheet > :not(.badger-watermark) {
+    position: relative;
+    z-index: 1;
+}
+
+.badger-watermark {
+    position: absolute;
+    right: 7mm;
+    bottom: 7mm;
+    z-index: 0;
+    width: 64mm;
+    max-height: 82mm;
+    object-fit: contain;
+    opacity: .075;
+    pointer-events: none;
+    user-select: none;
 }
 
 .page-front {
@@ -208,5 +227,13 @@ h2 {
         margin: 0;
         padding: 0;
         box-shadow: none;
+    }
+
+    .badger-watermark {
+        right: 0;
+        bottom: 0;
+        opacity: .075;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
 }
