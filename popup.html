@@ -9,12 +9,33 @@
         }
 
         body {
+            position: relative;
             width: 430px;
             padding: 14px;
             font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
             background: #f4f6f8;
             color: #24313d;
             margin: 0;
+            overflow-x: hidden;
+        }
+
+        body::before,
+        .panel::before {
+            content: "";
+            position: fixed;
+            right: -28px;
+            bottom: -24px;
+            z-index: 0;
+            width: 230px;
+            height: 230px;
+            background: url("барсук.png") center / contain no-repeat;
+            opacity: .16;
+            pointer-events: none;
+        }
+
+        body > * {
+            position: relative;
+            z-index: 1;
         }
 
         h3, h4 {
@@ -166,6 +187,15 @@
             padding: 14px;
             overflow: auto;
             background: #f4f6f8;
+        }
+
+        .panel::before {
+            z-index: 0;
+        }
+
+        .panel > * {
+            position: relative;
+            z-index: 1;
         }
 
         .hidden {

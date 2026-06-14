@@ -126,7 +126,7 @@ function appendAnalysisRows(analyses, appointmentDate) {
 
 function render(payload) {
     if (!payload) {
-        document.getElementById('printRoot').innerHTML = '<section class="sheet"><img class="badger-watermark" src="барсук.png" alt="" aria-hidden="true"><h1>Лист назначений не найден</h1><p>Откройте печатную форму из popup FillBARS повторно.</p></section>';
+        document.getElementById('printRoot').innerHTML = '<section class="sheet"><h1>Лист назначений не найден</h1><p>Откройте печатную форму из popup FillBARS повторно.</p></section>';
         return;
     }
 
