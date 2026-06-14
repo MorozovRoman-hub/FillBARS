@@ -1,0 +1,212 @@
+@page {
+    size: A4 landscape;
+    margin: 8mm;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #e7edf3;
+    color: #000;
+    font-family: "Times New Roman", Times, serif;
+}
+
+.print-actions {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    padding: 10px;
+    background: #263746;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .16);
+}
+
+.print-actions button {
+    min-width: 120px;
+    padding: 9px 14px;
+    border: 0;
+    border-radius: 4px;
+    background: #fff;
+    color: #162330;
+    font: 700 14px Arial, sans-serif;
+    cursor: pointer;
+}
+
+.sheet {
+    width: 297mm;
+    min-height: 210mm;
+    margin: 14px auto;
+    padding: 8mm;
+    background: #fff;
+    box-shadow: 0 0 14px rgba(0, 0, 0, .14);
+}
+
+.page-front {
+    page-break-after: always;
+}
+
+h1 {
+    margin: 0 0 5mm;
+    text-align: center;
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+h2 {
+    margin: 0 0 5mm;
+    text-align: center;
+    font-size: 11pt;
+    font-weight: 400;
+}
+
+.patient-lines {
+    margin-bottom: 3mm;
+    font-size: 8.7pt;
+    line-height: 1.2;
+}
+
+.line-row {
+    display: flex;
+    gap: 3mm;
+    margin-bottom: 2.2mm;
+}
+
+.line-field {
+    flex: 1;
+    min-height: 4.5mm;
+    border-bottom: 1px solid #000;
+}
+
+.line-field strong {
+    font-weight: 400;
+}
+
+.line-field.wide {
+    flex: 1.7;
+}
+
+.line-field.short {
+    flex: .7;
+}
+
+.line-field.full {
+    flex: 1 1 100%;
+}
+
+.orders-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 6.6pt;
+    line-height: 1.05;
+}
+
+.orders-table th,
+.orders-table td {
+    border: 1px solid #000;
+    padding: .8mm;
+    vertical-align: top;
+    font-weight: 400;
+}
+
+.orders-table th {
+    text-align: center;
+}
+
+.medication-table {
+    height: 142mm;
+}
+
+.medication-table .med-name {
+    width: 70mm;
+}
+
+.medication-table .date-col {
+    width: 17.5mm;
+}
+
+.medication-table .reaction-col {
+    width: 20mm;
+}
+
+.medication-table tbody td {
+    height: 5.6mm;
+}
+
+.medication-text {
+    font-size: 7pt;
+}
+
+.control-signature-row td {
+    height: 8mm;
+    vertical-align: middle;
+    text-align: center;
+    font-size: 6.6pt;
+}
+
+.control-signature-row td:first-child {
+    text-align: left;
+    font-size: 7.2pt;
+}
+
+.control-signature-row .signature-cell {
+    background: #fff;
+}
+
+.intervention-table {
+    height: 178mm;
+    font-size: 7.4pt;
+}
+
+.intervention-table th:nth-child(1) {
+    width: 143mm;
+}
+
+.intervention-table th:nth-child(2) {
+    width: 27.5mm;
+}
+
+.intervention-table th:nth-child(3) {
+    width: 30mm;
+}
+
+.intervention-table th:nth-child(4) {
+    width: 27.5mm;
+}
+
+.intervention-table th:nth-child(5) {
+    width: 42mm;
+}
+
+.intervention-table tbody td {
+    height: 5.6mm;
+}
+
+.muted {
+    color: #555;
+}
+
+@media print {
+    body {
+        background: #fff;
+    }
+
+    .print-actions {
+        display: none;
+    }
+
+    .sheet {
+        width: auto;
+        min-height: 194mm;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+}
