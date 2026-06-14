@@ -54,13 +54,14 @@ body {
 
 .badger-watermark {
     position: absolute;
-    right: 7mm;
-    bottom: 7mm;
+    top: 50%;
+    left: 50%;
     z-index: 0;
-    width: 64mm;
-    max-height: 82mm;
+    width: 128mm;
+    max-height: 150mm;
+    transform: translate(-50%, -45%);
     object-fit: contain;
-    opacity: .075;
+    opacity: .15;
     pointer-events: none;
     user-select: none;
 }
@@ -230,9 +231,9 @@ h2 {
     }
 
     .badger-watermark {
-        right: 0;
-        bottom: 0;
-        opacity: .075;
+        top: 50%;
+        left: 50%;
+        opacity: .14;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
