@@ -218,14 +218,22 @@
           "duration": "",
           "regimen": "",
           "comment": ""
+        },
+        {
+          "id": "manual-fasting-pancreatitis",
+          "source": "manual",
+          "atc": "",
+          "name": "Лечебное питание: голод",
+          "form": "",
+          "dose": "",
+          "route": "",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
         }
       ],
       "procedures": [
-        {
-          "id": "procedure-fasting-pancreatitis",
-          "name": "Лечебное питание: голод",
-          "comment": ""
-        },
         {
           "id": "procedure-egds-pancreatitis",
           "name": "ЭГДС",
@@ -572,14 +580,22 @@
           "duration": "",
           "regimen": "",
           "comment": ""
+        },
+        {
+          "id": "manual-fasting-gib",
+          "source": "manual",
+          "atc": "",
+          "name": "Лечебное питание: голод",
+          "form": "",
+          "dose": "",
+          "route": "",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
         }
       ],
       "procedures": [
-        {
-          "id": "procedure-fasting-gib",
-          "name": "Лечебное питание: голод",
-          "comment": ""
-        },
         {
           "id": "procedure-egds-gib",
           "name": "ЭГДС",
