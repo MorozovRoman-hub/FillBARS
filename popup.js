@@ -1069,19 +1069,37 @@ async function saveSelectedProfileToJournal() {
         return;
     }
 
-    const entry = {
-        id: generateId('journal'),
-        createdAt: new Date().toISOString(),
-        medicalCardNumber: '',
-        profileName,
-        medications: payload.medications,
-        procedures: payload.procedures,
-        analyses: payload.analyses
-    };
+    const button = document.getElementById('saveJournalEntry');
+    button.disabled = true;
+    setStatus('⏳ Получаю номер медицинской карты из БАРС...', '#ff9800');
 
-    await addJournalEntry(entry);
-    renderJournalPanel();
-    setStatus('✅ Запись сохранена в локальный журнал');
+    try {
+        const patientData = await getPatientDataFromActiveBarsPage();
+        const medicalCardNumber = String(patientData.medicalCardNumber || '').trim();
+        if (!/^\d{6,}$/.test(medicalCardNumber)) {
+            setStatus('❌ Номер медицинской карты не найден. Запись в журнал не сохранена', '#f44336');
+            return;
+        }
+
+        const entry = {
+            id: generateId('journal'),
+            createdAt: new Date().toISOString(),
+            medicalCardNumber,
+            profileName,
+            medications: payload.medications,
+            procedures: payload.procedures,
+            analyses: payload.analyses
+        };
+
+        await addJournalEntry(entry);
+        await renderJournalPanel();
+        setStatus(`✅ Запись для карты № ${medicalCardNumber} сохранена в журнал`);
+    } catch (error) {
+        console.error('Не удалось получить номер медицинской карты из БАРС', error);
+        setStatus(`❌ Не удалось сохранить запись: ${error.message}`, '#f44336');
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function buildPayloadFromJournalEntry(entry) {
