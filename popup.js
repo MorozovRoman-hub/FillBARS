@@ -825,10 +825,10 @@ function getSelectedProfileName() {
     return document.getElementById('profileSelect')?.value || '';
 }
 
-function getPatientPrintFields() {
+function getPatientPrintFields(patientData = {}) {
     return {
-        fullName: document.getElementById('patientFullName')?.value.trim() || '',
-        birthDate: document.getElementById('patientBirthDate')?.value || '',
+        fullName: sanitizePulledFullName(patientData.fullName),
+        birthDate: normalizeDateForInput(patientData.birthDate),
         appointmentDate: document.getElementById('appointmentDate')?.value || new Date().toISOString().slice(0, 10)
     };
 }
@@ -868,29 +868,6 @@ function sanitizePulledFullName(value) {
     }
 
     return '';
-}
-
-function fillPulledPatientData(data = {}) {
-    const fullName = sanitizePulledFullName(data.fullName);
-    const birthDate = normalizeDateForInput(data.birthDate);
-
-    if (fullName) {
-        document.getElementById('patientFullName').value = fullName;
-    }
-
-    if (birthDate) {
-        document.getElementById('patientBirthDate').value = birthDate;
-    }
-
-    if (fullName || birthDate) {
-        const missing = [
-            fullName ? '' : 'ФИО',
-            birthDate ? '' : 'даты рождения'
-        ].filter(Boolean);
-        setStatus(`✅ Данные пациента подтянуты${missing.length ? `, не найдено: ${missing.join(', ')}` : ''}`);
-    } else {
-        setStatus('⚠️ Не удалось найти ФИО и дату рождения на странице БАРС', '#ff9800');
-    }
 }
 
 function scorePulledPatientData(data = {}) {
@@ -944,30 +921,25 @@ function pickBestPatientData(results = []) {
     return payloads.sort((left, right) => scorePulledPatientData(right) - scorePulledPatientData(left))[0] || {};
 }
 
-async function pullPatientFromBarsPage() {
-    const button = document.getElementById('pullPatientFromBars');
-    button.disabled = true;
-    setStatus('⏳ Поиск данных пациента на странице БАРС...', '#ff9800');
-
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (!tabs || !tabs[0]) {
-            button.disabled = false;
-            setStatus('❌ Активная вкладка не найдена', '#f44336');
-            return;
-        }
-
-        chrome.scripting.executeScript({
-            target: { tabId: tabs[0].id, allFrames: true },
-            func: readPatientDataFromBarsPage
-        }, (results) => {
-            button.disabled = false;
-
-            if (chrome.runtime.lastError) {
-                setStatus(`❌ Не удалось прочитать страницу: ${chrome.runtime.lastError.message}`, '#f44336');
+function getPatientDataFromActiveBarsPage() {
+    return new Promise((resolve, reject) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs || !tabs[0]) {
+                reject(new Error('Активная вкладка не найдена'));
                 return;
             }
 
-            fillPulledPatientData(pickBestPatientData(results || []));
+            chrome.scripting.executeScript({
+                target: { tabId: tabs[0].id, allFrames: true },
+                func: readPatientDataFromBarsPage
+            }, (results) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+
+                resolve(pickBestPatientData(results || []));
+            });
         });
     });
 }
@@ -995,16 +967,43 @@ function openPrintPayload(payload) {
     });
 }
 
-function openPrintSheetForSelectedProfile() {
+async function openPrintSheetForSelectedProfile() {
     const profileName = getSelectedProfileName();
-    const payload = buildAssignmentPayload(profileName);
-    if (!payload) {
+    if (!profileName || !PROFILES[profileName]) {
         setStatus('❌ Выберите профиль назначений', '#f44336');
         return;
     }
 
-    localStorage.setItem('lastSelectedProfile', profileName);
-    openPrintPayload(payload);
+    const button = document.getElementById('openPrintSheet');
+    button.disabled = true;
+    setStatus('⏳ Получаю ФИО и дату рождения из БАРС...', '#ff9800');
+
+    try {
+        const patientData = await getPatientDataFromActiveBarsPage();
+        const patient = getPatientPrintFields(patientData);
+        const payload = buildAssignmentPayload(profileName, { patient });
+
+        if (!payload) {
+            setStatus('❌ Не удалось сформировать лист назначений', '#f44336');
+            return;
+        }
+
+        localStorage.setItem('lastSelectedProfile', profileName);
+        openPrintPayload(payload);
+
+        const missing = [
+            patient.fullName ? '' : 'ФИО',
+            patient.birthDate ? '' : 'дата рождения'
+        ].filter(Boolean);
+        setStatus(missing.length
+            ? `⚠️ Лист открыт, не найдено: ${missing.join(', ')}`
+            : '✅ Лист назначений открыт');
+    } catch (error) {
+        console.error('Не удалось получить данные пациента из БАРС', error);
+        setStatus(`❌ Не удалось прочитать данные пациента из БАРС: ${error.message}`, '#f44336');
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function saveSelectedProfileToJournal() {
@@ -2303,7 +2302,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('markUrgentCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('journalEnabledCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('journalRetentionDays').addEventListener('change', saveScenarioSettingsFromUi);
-    document.getElementById('pullPatientFromBars').addEventListener('click', pullPatientFromBarsPage);
     document.getElementById('openPrintSheet').addEventListener('click', openPrintSheetForSelectedProfile);
     document.getElementById('saveJournalEntry').addEventListener('click', () => {
         saveSelectedProfileToJournal().catch((error) => {
