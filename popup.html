@@ -9,12 +9,40 @@
         }
 
         body {
+            position: relative;
             width: 430px;
             padding: 14px;
             font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
             background: #f4f6f8;
             color: #24313d;
             margin: 0;
+            overflow-x: hidden;
+        }
+
+        body::before,
+        .panel::before {
+            content: "";
+            position: fixed;
+            right: -28px;
+            z-index: 0;
+            width: 230px;
+            height: 230px;
+            background: url("images/барсук.png") center / contain no-repeat;
+            opacity: .16;
+            pointer-events: none;
+        }
+
+        body::before {
+            position: absolute;
+            top: 48px;
+            right: -18px;
+            width: 180px;
+            height: 180px;
+        }
+
+        body > * {
+            position: relative;
+            z-index: 1;
         }
 
         h3, h4 {
@@ -26,6 +54,37 @@
             text-align: center;
             padding-bottom: 8px;
             border-bottom: 1px solid #d8dee5;
+        }
+
+        .app-header {
+            display: grid;
+            grid-template-columns: 34px 1fr 34px;
+            align-items: center;
+            min-height: 36px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #d8dee5;
+        }
+
+        .app-header h3 {
+            grid-column: 2;
+            padding: 0;
+            border: 0;
+        }
+
+        .header-settings {
+            grid-column: 3;
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            border: 1px solid #c8d1da;
+            background: #eef3f7;
+            color: #314151;
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .header-settings:hover {
+            background: #e2eaf1;
         }
 
         h4 {
@@ -138,6 +197,7 @@
         }
 
         .warning {
+            width: 66.666%;
             margin-top: 10px;
             padding: 9px;
             border-left: 4px solid #d4a62b;
@@ -155,10 +215,6 @@
             color: #2f8f5b;
         }
 
-        .settings-button {
-            margin-top: 9px;
-        }
-
         .panel {
             position: fixed;
             inset: 0;
@@ -166,6 +222,16 @@
             padding: 14px;
             overflow: auto;
             background: #f4f6f8;
+        }
+
+        .panel::before {
+            top: 235px;
+            z-index: 0;
+        }
+
+        .panel > * {
+            position: relative;
+            z-index: 1;
         }
 
         .hidden {
@@ -325,7 +391,10 @@
     </style>
 </head>
 <body>
-    <h3>📋 FillBARS - назначения</h3>
+    <header class="app-header">
+        <h3>📋 FillBARS - назначения</h3>
+        <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
+    </header>
 
     <div class="warning">
         Перед назначением анализов убедитесь, что в БАРС отображаются все нужные исследования. Расширение не нажимает финальную кнопку записи.
@@ -336,28 +405,11 @@
         <select id="profileSelect">
             <option value="">-- Выберите профиль --</option>
         </select>
-        <button id="settingsToggle" class="settings-button ghost" type="button">⚙ Настройки и профили</button>
     </div>
 
     <div class="section">
-        <h4>Данные для печатного листа</h4>
-        <div class="field-grid">
-            <div>
-                <label for="appointmentDate">Дата назначения</label>
-                <input id="appointmentDate" type="date">
-            </div>
-            <div class="full">
-                <label for="patientFullName">ФИО пациента</label>
-                <input id="patientFullName" type="text" autocomplete="off">
-            </div>
-            <div>
-                <label for="patientBirthDate">Дата рождения</label>
-                <input id="patientBirthDate" type="date">
-            </div>
-            <div class="full">
-                <button id="pullPatientFromBars" class="ghost" type="button">↙ Подтянуть ФИО и дату рождения из БАРС</button>
-            </div>
-        </div>
+        <label for="appointmentDate">Дата назначения</label>
+        <input id="appointmentDate" type="date">
     </div>
 
     <div class="button-stack">
@@ -371,7 +423,7 @@
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 4.0 | Для медицинских информационных систем</div>
+    <div class="version">Версия 4.3 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">

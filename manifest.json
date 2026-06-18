@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Form Filler (МИС БАРС)",
-  "version": "4.0",
+  "version": "4.3",
   "description": "Автоматическое назначение анализов в МИС БАРС с выбором профилей",
   "permissions": [
     "activeTab",
