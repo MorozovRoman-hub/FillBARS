@@ -51,36 +51,24 @@ function medicationToText(medication) {
     ].map((value) => String(value || '').trim()).filter(Boolean).join(', ');
 }
 
-function procedureToText(procedure) {
-    const details = [procedure?.name, procedure?.comment]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-        .join(' — ');
-    return details ? `Диагностическое/режимное назначение: ${details}` : '';
-}
-
-function appendMedicationRows(medications, procedures, appointmentDate) {
+function appendMedicationRows(medications, appointmentDate) {
     const body = document.getElementById('medicationRows');
     body.textContent = '';
 
-    const assignments = [
-        ...procedures.map((procedure) => ({ text: procedureToText(procedure) })),
-        ...medications.map((medication) => ({ text: medicationToText(medication) }))
-    ];
     const minRows = 14;
-    const rows = Math.max(minRows, assignments.length);
+    const rows = Math.max(minRows, medications.length);
 
     for (let index = 0; index < rows; index += 1) {
         const row = document.createElement('tr');
-        const assignment = assignments[index];
+        const medication = medications[index];
 
         const nameCell = document.createElement('td');
         nameCell.className = 'medication-text';
-        nameCell.textContent = assignment?.text || '';
+        nameCell.textContent = medication ? medicationToText(medication) : '';
         row.appendChild(nameCell);
 
         const dateCell = document.createElement('td');
-        dateCell.textContent = assignment ? appointmentDate : '';
+        dateCell.textContent = medication ? appointmentDate : '';
         row.appendChild(dateCell);
 
         row.appendChild(document.createElement('td'));
@@ -110,23 +98,30 @@ function appendMedicationRows(medications, procedures, appointmentDate) {
     body.appendChild(controlRow);
 }
 
-function appendAnalysisRows(analyses, appointmentDate) {
+function appendAnalysisRows(analyses, procedures, appointmentDate) {
     const body = document.getElementById('analysisRows');
     body.textContent = '';
 
+    const interventions = [
+        ...analyses.map((analysis) => analysis.name || `Исследование ${analysis.id}`),
+        ...procedures.map((procedure) => [procedure?.name, procedure?.comment]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .join(' — '))
+    ].filter(Boolean);
     const minRows = 28;
-    const rows = Math.max(minRows, analyses.length);
+    const rows = Math.max(minRows, interventions.length);
 
     for (let index = 0; index < rows; index += 1) {
         const row = document.createElement('tr');
-        const analysis = analyses[index];
+        const intervention = interventions[index];
 
         const nameCell = document.createElement('td');
-        nameCell.textContent = analysis ? analysis.name || `Исследование ${analysis.id}` : '';
+        nameCell.textContent = intervention || '';
         row.appendChild(nameCell);
 
         const dateCell = document.createElement('td');
-        dateCell.textContent = analysis ? appointmentDate : '';
+        dateCell.textContent = intervention ? appointmentDate : '';
         row.appendChild(dateCell);
 
         row.appendChild(document.createElement('td'));
@@ -148,12 +143,12 @@ function render(payload) {
     setText('patientFullName', patient.fullName);
     setText('patientBirthDate', formatDate(patient.birthDate));
 
-    appendMedicationRows(
-        Array.isArray(payload.medications) ? payload.medications : [],
+    appendMedicationRows(Array.isArray(payload.medications) ? payload.medications : [], appointmentDate);
+    appendAnalysisRows(
+        Array.isArray(payload.analyses) ? payload.analyses : [],
         Array.isArray(payload.procedures) ? payload.procedures : [],
         appointmentDate
     );
-    appendAnalysisRows(Array.isArray(payload.analyses) ? payload.analyses : [], appointmentDate);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

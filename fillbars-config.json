@@ -559,6 +559,19 @@
           "duration": "",
           "regimen": "",
           "comment": ""
+        },
+        {
+          "id": "manual-gastric-tube-gib",
+          "source": "manual",
+          "atc": "",
+          "name": "Зонд в желудок",
+          "form": "",
+          "dose": "",
+          "route": "",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
         }
       ],
       "procedures": [
@@ -575,11 +588,6 @@
         {
           "id": "procedure-ecg-gib",
           "name": "ЭКГ",
-          "comment": ""
-        },
-        {
-          "id": "procedure-gastric-tube-gib",
-          "name": "Установка желудочного зонда",
           "comment": ""
         },
         {
