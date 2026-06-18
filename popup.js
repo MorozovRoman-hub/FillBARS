@@ -62,6 +62,7 @@ let loadedResearches = loadSavedResearches();
 let editingProfileName = null;
 let selectedResearchIds = new Set();
 let selectedMedications = [];
+let selectedProcedures = [];
 let selectedProfileIcon = PROFILE_ICONS[0];
 let activeProfileEditorTab = 'analyses';
 
@@ -125,24 +126,61 @@ function normalizeMedications(rawMedications) {
         .filter(Boolean);
 }
 
+function normalizeProcedure(rawProcedure) {
+    if (typeof rawProcedure === 'string') {
+        const name = rawProcedure.trim();
+        return name ? {
+            id: `procedure-${name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-|-$/g, '')}`,
+            name,
+            comment: ''
+        } : null;
+    }
+
+    if (!isPlainObject(rawProcedure)) {
+        return null;
+    }
+
+    const name = String(rawProcedure.name || '').trim();
+    if (!name) {
+        return null;
+    }
+
+    return {
+        id: String(rawProcedure.id || `procedure-${name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-|-$/g, '')}`),
+        name,
+        comment: String(rawProcedure.comment || '').trim()
+    };
+}
+
+function normalizeProcedures(rawProcedures) {
+    if (!Array.isArray(rawProcedures)) {
+        return [];
+    }
+
+    return rawProcedures.map(normalizeProcedure).filter(Boolean);
+}
+
 function normalizeProfile(rawProfile) {
     if (!isPlainObject(rawProfile)) {
         return {
             analyses: {},
-            medications: []
+            medications: [],
+            procedures: []
         };
     }
 
-    if (isPlainObject(rawProfile.analyses) || Array.isArray(rawProfile.medications)) {
+    if (isPlainObject(rawProfile.analyses) || Array.isArray(rawProfile.medications) || Array.isArray(rawProfile.procedures)) {
         return {
             analyses: normalizeAnalyses(rawProfile.analyses),
-            medications: normalizeMedications(rawProfile.medications)
+            medications: normalizeMedications(rawProfile.medications),
+            procedures: normalizeProcedures(rawProfile.procedures)
         };
     }
 
     return {
         analyses: normalizeAnalyses(rawProfile),
-        medications: []
+        medications: [],
+        procedures: []
     };
 }
 
@@ -233,7 +271,10 @@ function normalizeDrugCatalog(rawCatalog) {
 
 async function loadDrugCatalogFile() {
     try {
-        const response = await fetch(chrome.runtime.getURL(DRUG_CATALOG_FILE_NAME), { cache: 'no-store' });
+        const url = globalThis.chrome?.runtime?.getURL
+            ? chrome.runtime.getURL(DRUG_CATALOG_FILE_NAME)
+            : DRUG_CATALOG_FILE_NAME;
+        const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) {
             return [];
         }
@@ -247,7 +288,10 @@ async function loadDrugCatalogFile() {
 
 async function loadExtensionConfigFile() {
     try {
-        const response = await fetch(chrome.runtime.getURL(CONFIG_FILE_NAME), { cache: 'no-store' });
+        const url = globalThis.chrome?.runtime?.getURL
+            ? chrome.runtime.getURL(CONFIG_FILE_NAME)
+            : CONFIG_FILE_NAME;
+        const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) {
             return {};
         }
@@ -304,6 +348,10 @@ function getProfileAnalyses(profile) {
 
 function getProfileMedications(profile) {
     return normalizeProfile(profile).medications;
+}
+
+function getProfileProcedures(profile) {
+    return normalizeProfile(profile).procedures;
 }
 
 function getActiveProfileNames() {
@@ -582,7 +630,7 @@ function renderProfileManagerList() {
 
         const name = document.createElement('span');
         name.className = 'profile-row-name';
-        name.textContent = `${profileName} (${Object.keys(profile.analyses).length} ан., ${profile.medications.length} преп.)`;
+        name.textContent = `${profileName} (${Object.keys(profile.analyses).length} ан., ${profile.medications.length} преп., ${profile.procedures.length} проц.)`;
 
         const editButton = document.createElement('button');
         editButton.type = 'button';
@@ -955,6 +1003,7 @@ function buildAssignmentPayload(profileName, options = {}) {
         profileName,
         patient: options.patient || getPatientPrintFields(),
         medications: getProfileMedications(profile),
+        procedures: getProfileProcedures(profile),
         analyses: getAnalysesForPrint(profile)
     };
 }
@@ -1026,6 +1075,7 @@ async function saveSelectedProfileToJournal() {
         medicalCardNumber: '',
         profileName,
         medications: payload.medications,
+        procedures: payload.procedures,
         analyses: payload.analyses
     };
 
@@ -1045,6 +1095,7 @@ function buildPayloadFromJournalEntry(entry) {
             appointmentDate: new Date(entry.createdAt || Date.now()).toISOString().slice(0, 10)
         },
         medications: normalizeMedications(entry.medications),
+        procedures: normalizeProcedures(entry.procedures),
         analyses: Array.isArray(entry.analyses) ? entry.analyses : []
     };
 }
@@ -1335,7 +1386,9 @@ function readPatientDataFromBarsPage() {
 }
 
 function switchProfileEditorTab(tabName) {
-    activeProfileEditorTab = tabName === 'medications' ? 'medications' : 'analyses';
+    activeProfileEditorTab = ['analyses', 'medications', 'procedures'].includes(tabName)
+        ? tabName
+        : 'analyses';
 
     document.querySelectorAll('.editor-tab').forEach((button) => {
         button.classList.toggle('active', button.dataset.tab === activeProfileEditorTab);
@@ -1555,6 +1608,118 @@ function renderSelectedMedications() {
     });
 }
 
+function procedureToText(procedure) {
+    return [procedure?.name, procedure?.comment]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join(' — ');
+}
+
+function clearProcedureForm() {
+    document.getElementById('procedureId').value = '';
+    document.getElementById('procedureName').value = '';
+    document.getElementById('procedureComment').value = '';
+    document.getElementById('addProcedureToProfile').textContent = 'Добавить назначение в профиль';
+}
+
+function renderSelectedProcedures() {
+    const list = document.getElementById('profileProcedureList');
+    const counter = document.getElementById('selectedProcedureCounter');
+    if (!list || !counter) {
+        return;
+    }
+
+    list.textContent = '';
+    counter.textContent = `Выбрано: ${selectedProcedures.length}`;
+
+    if (selectedProcedures.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Диагностические и режимные назначения пока не добавлены';
+        list.appendChild(empty);
+        return;
+    }
+
+    selectedProcedures.forEach((procedure, index) => {
+        const row = document.createElement('div');
+        row.className = 'medication-row';
+
+        const text = document.createElement('div');
+        text.className = 'medication-row-text';
+        text.textContent = procedureToText(procedure);
+
+        const controls = document.createElement('div');
+        controls.className = 'medication-row-actions';
+
+        const upButton = document.createElement('button');
+        upButton.type = 'button';
+        upButton.className = 'small-btn';
+        upButton.textContent = '↑';
+        upButton.disabled = index === 0;
+        upButton.addEventListener('click', () => {
+            [selectedProcedures[index - 1], selectedProcedures[index]] = [selectedProcedures[index], selectedProcedures[index - 1]];
+            renderSelectedProcedures();
+        });
+
+        const downButton = document.createElement('button');
+        downButton.type = 'button';
+        downButton.className = 'small-btn';
+        downButton.textContent = '↓';
+        downButton.disabled = index === selectedProcedures.length - 1;
+        downButton.addEventListener('click', () => {
+            [selectedProcedures[index + 1], selectedProcedures[index]] = [selectedProcedures[index], selectedProcedures[index + 1]];
+            renderSelectedProcedures();
+        });
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'small-btn';
+        editButton.textContent = 'Ред.';
+        editButton.addEventListener('click', () => {
+            document.getElementById('procedureId').value = procedure.id;
+            document.getElementById('procedureName').value = procedure.name;
+            document.getElementById('procedureComment').value = procedure.comment;
+            document.getElementById('addProcedureToProfile').textContent = 'Обновить назначение';
+        });
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'small-btn danger-mini';
+        deleteButton.textContent = 'Удалить';
+        deleteButton.addEventListener('click', () => {
+            selectedProcedures.splice(index, 1);
+            renderSelectedProcedures();
+        });
+
+        controls.append(upButton, downButton, editButton, deleteButton);
+        row.append(text, controls);
+        list.appendChild(row);
+    });
+}
+
+function addProcedureFromEditor() {
+    const procedure = normalizeProcedure({
+        id: document.getElementById('procedureId').value || generateId('procedure'),
+        name: document.getElementById('procedureName').value,
+        comment: document.getElementById('procedureComment').value
+    });
+
+    if (!procedure) {
+        setStatus('❌ Укажите название диагностического или режимного назначения', '#f44336');
+        return;
+    }
+
+    const existingIndex = selectedProcedures.findIndex((item) => item.id === procedure.id);
+    if (existingIndex >= 0) {
+        selectedProcedures[existingIndex] = procedure;
+    } else {
+        selectedProcedures.push(procedure);
+    }
+
+    renderSelectedProcedures();
+    clearProcedureForm();
+}
+
 function addMedicationFromEditor() {
     const rawMedication = getMedicationFormValues();
     if (!rawMedication.id) {
@@ -1640,6 +1805,7 @@ async function openProfileEditor(profileName = null) {
         selectedProfileIcon = profileTitle.icon;
         selectedResearchIds = new Set(Object.keys(profile.analyses));
         selectedMedications = [...profile.medications];
+        selectedProcedures = [...profile.procedures];
         nameInput.value = profileTitle.name;
         title.textContent = 'Редактирование профиля';
         saveButton.textContent = 'Сохранить назначение';
@@ -1647,6 +1813,7 @@ async function openProfileEditor(profileName = null) {
         selectedProfileIcon = PROFILE_ICONS[0];
         selectedResearchIds = new Set();
         selectedMedications = [];
+        selectedProcedures = [];
         nameInput.value = '';
         title.textContent = 'Новое назначение';
         saveButton.textContent = 'Добавить назначение';
@@ -1655,12 +1822,14 @@ async function openProfileEditor(profileName = null) {
     document.getElementById('researchSearch').value = '';
     document.getElementById('drugSearch').value = '';
     clearMedicationForm();
+    clearProcedureForm();
     editor.classList.remove('hidden');
     switchProfileEditorTab('analyses');
     renderIconPicker();
     renderResearchList();
     renderDrugCatalogSearch();
     renderSelectedMedications();
+    renderSelectedProcedures();
 
     await loadResearchesForEditor();
 }
@@ -1669,6 +1838,7 @@ function closeProfileEditor() {
     editingProfileName = null;
     selectedResearchIds = new Set();
     selectedMedications = [];
+    selectedProcedures = [];
     document.getElementById('profileEditor').classList.add('hidden');
 }
 
@@ -1681,8 +1851,8 @@ function saveProfileFromEditor() {
         return;
     }
 
-    if (selectedResearchIds.size === 0 && selectedMedications.length === 0) {
-        setStatus('❌ Выберите хотя бы одно исследование или препарат', '#f44336');
+    if (selectedResearchIds.size === 0 && selectedMedications.length === 0 && selectedProcedures.length === 0) {
+        setStatus('❌ Добавьте хотя бы одно исследование, препарат или процедуру', '#f44336');
         return;
     }
 
@@ -1709,7 +1879,8 @@ function saveProfileFromEditor() {
 
     customProfiles[newTitle] = {
         analyses,
-        medications: normalizeMedications(selectedMedications)
+        medications: normalizeMedications(selectedMedications),
+        procedures: normalizeProcedures(selectedProcedures)
     };
     activeProfileNames.add(newTitle);
     saveCustomProfiles(customProfiles);
@@ -2297,6 +2468,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('addMedicationToProfile').addEventListener('click', addMedicationFromEditor);
     document.getElementById('clearMedicationForm').addEventListener('click', clearMedicationForm);
     document.getElementById('saveManualDrug').addEventListener('click', saveManualDrugToCatalog);
+    document.getElementById('addProcedureToProfile').addEventListener('click', addProcedureFromEditor);
+    document.getElementById('clearProcedureForm').addEventListener('click', clearProcedureForm);
     document.getElementById('assignmentStageSlider').addEventListener('input', saveScenarioSettingsFromUi);
     document.getElementById('targetCabinetInput').addEventListener('input', saveScenarioSettingsFromUi);
     document.getElementById('markUrgentCheckbox').addEventListener('change', saveScenarioSettingsFromUi);

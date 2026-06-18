@@ -286,7 +286,7 @@
 
         .editor-tabs {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 6px;
             margin: 10px 0;
         }
@@ -488,6 +488,7 @@
             <div class="editor-tabs">
                 <button class="editor-tab active" data-tab="analyses" type="button">Анализы</button>
                 <button class="editor-tab" data-tab="medications" type="button">Препараты</button>
+                <button class="editor-tab" data-tab="procedures" type="button">Процедуры</button>
             </div>
 
             <div class="editor-tab-panel" data-panel="analyses">
@@ -558,6 +559,22 @@
                 <h4 class="settings-button">Препараты профиля</h4>
                 <div id="selectedMedicationCounter" class="hint"></div>
                 <div id="profileMedicationList" class="scroll-list"></div>
+            </div>
+
+            <div class="editor-tab-panel hidden" data-panel="procedures">
+                <input id="procedureId" type="hidden">
+                <label for="procedureName">Диагностическое, режимное или иное назначение</label>
+                <input id="procedureName" type="text" placeholder="ЭГДС, ЭКГ, УЗИ, диета, режим">
+                <label for="procedureComment">Комментарий</label>
+                <input id="procedureComment" type="text" placeholder="Область исследования или дополнительные указания">
+                <div class="button-stack">
+                    <button id="addProcedureToProfile" type="button">Добавить назначение в профиль</button>
+                    <button id="clearProcedureForm" class="ghost" type="button">Очистить поля</button>
+                </div>
+
+                <h4 class="settings-button">Процедуры и режим профиля</h4>
+                <div id="selectedProcedureCounter" class="hint"></div>
+                <div id="profileProcedureList" class="scroll-list"></div>
             </div>
 
             <div class="button-stack">

@@ -51,24 +51,36 @@ function medicationToText(medication) {
     ].map((value) => String(value || '').trim()).filter(Boolean).join(', ');
 }
 
-function appendMedicationRows(medications, appointmentDate) {
+function procedureToText(procedure) {
+    const details = [procedure?.name, procedure?.comment]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join(' — ');
+    return details ? `Диагностическое/режимное назначение: ${details}` : '';
+}
+
+function appendMedicationRows(medications, procedures, appointmentDate) {
     const body = document.getElementById('medicationRows');
     body.textContent = '';
 
+    const assignments = [
+        ...procedures.map((procedure) => ({ text: procedureToText(procedure) })),
+        ...medications.map((medication) => ({ text: medicationToText(medication) }))
+    ];
     const minRows = 14;
-    const rows = Math.max(minRows, medications.length);
+    const rows = Math.max(minRows, assignments.length);
 
     for (let index = 0; index < rows; index += 1) {
         const row = document.createElement('tr');
-        const medication = medications[index];
+        const assignment = assignments[index];
 
         const nameCell = document.createElement('td');
         nameCell.className = 'medication-text';
-        nameCell.textContent = medication ? medicationToText(medication) : '';
+        nameCell.textContent = assignment?.text || '';
         row.appendChild(nameCell);
 
         const dateCell = document.createElement('td');
-        dateCell.textContent = medication ? appointmentDate : '';
+        dateCell.textContent = assignment ? appointmentDate : '';
         row.appendChild(dateCell);
 
         row.appendChild(document.createElement('td'));
@@ -136,7 +148,11 @@ function render(payload) {
     setText('patientFullName', patient.fullName);
     setText('patientBirthDate', formatDate(patient.birthDate));
 
-    appendMedicationRows(Array.isArray(payload.medications) ? payload.medications : [], appointmentDate);
+    appendMedicationRows(
+        Array.isArray(payload.medications) ? payload.medications : [],
+        Array.isArray(payload.procedures) ? payload.procedures : [],
+        appointmentDate
+    );
     appendAnalysisRows(Array.isArray(payload.analyses) ? payload.analyses : [], appointmentDate);
 }
 
