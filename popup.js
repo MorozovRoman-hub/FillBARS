@@ -2405,7 +2405,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log("╔════════════════════════════════════════════════════════════╗");
     console.log("║  МИС БАРС - Автоматическое назначение анализов           ║");
     console.log("║  Разработчик: MorozovRV and Bitucckii VA                 ║");
-    console.log("║  Версия: 3.0                                              ║");
+    console.log("║  Версия: 4.3                                              ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
     
