@@ -2762,8 +2762,29 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         checkbox.click();
     };
 
-    const waitForBarsToProcessSelection = async () => {
-        await sleep(220);
+    const waitForBarsToProcessSelection = async (itemValue, desiredState) => {
+        const startedAt = Date.now();
+
+        while (Date.now() - startedAt < 3000) {
+            await sleep(180);
+
+            const checkbox = findCheckboxByItemValue(itemValue);
+            const selectedValues = getSelectedOrderItemValues();
+            const checkboxMatches = !!checkbox && checkbox.checked === desiredState;
+            const selectedListMatches = selectedValues.sourceCount === 0
+                || selectedValues.values.has(itemValue) === desiredState;
+
+            if (checkboxMatches && selectedListMatches) {
+                return true;
+            }
+        }
+
+        await sleep(350);
+        const checkbox = findCheckboxByItemValue(itemValue);
+        const selectedValues = getSelectedOrderItemValues();
+        return !!checkbox
+            && checkbox.checked === desiredState
+            && (selectedValues.sourceCount === 0 || selectedValues.values.has(itemValue) === desiredState);
     };
 
     const setCheckboxStateThroughBars = async (itemValue, desiredState) => {
@@ -2775,15 +2796,17 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                 return false;
             }
 
-            if (checkbox.checked === desiredState) {
+            if (checkbox.checked === desiredState && await waitForBarsToProcessSelection(itemValue, desiredState)) {
                 return true;
             }
 
             clickCheckboxLikeUser(checkbox);
-            await waitForBarsToProcessSelection();
+            if (await waitForBarsToProcessSelection(itemValue, desiredState)) {
+                return true;
+            }
         }
 
-        return !!findCheckboxByItemValue(itemValue)?.checked === desiredState;
+        return await waitForBarsToProcessSelection(itemValue, desiredState);
     };
 
     const resyncSelectedCheckboxThroughBars = async (itemValue) => {
@@ -3528,10 +3551,67 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return grid || orderRoot || document;
     };
 
+    const waitForResearchGridStable = async (minStableMs = 1200, timeout = 8000) => {
+        const startedAt = Date.now();
+        let lastSignature = '';
+        let stableSince = Date.now();
+
+        while (Date.now() - startedAt < timeout) {
+            await sleep(250);
+
+            const checkboxes = getCheckboxes();
+            const rect = getResearchGridRoot().getBoundingClientRect();
+            const signature = [
+                checkboxes.length,
+                Math.round(rect.left),
+                Math.round(rect.top),
+                Math.round(rect.width),
+                Math.round(rect.height),
+                checkboxes.slice(0, 10).map((checkbox) => checkbox.getAttribute('item_value')).join(',')
+            ].join('|');
+
+            if (signature !== lastSignature) {
+                lastSignature = signature;
+                stableSince = Date.now();
+            }
+
+            if (checkboxes.length > 0 && Date.now() - stableSince >= minStableMs) {
+                return checkboxes.length;
+            }
+        }
+
+        return getCheckboxes().length;
+    };
+
+    const getSelectedOrderItemValues = () => {
+        const orderRoot = getResearchOrderRoot();
+        const researchGrid = getResearchGridRoot();
+        const allOutsideResearchGrid = Array.from((orderRoot || document).querySelectorAll('[item_value]'))
+            .filter((element) => {
+                const itemValue = element.getAttribute('item_value');
+                return itemValue
+                    && element.name !== 'GridResearch_SelectList_Item'
+                    && !researchGrid.contains(element);
+            });
+        const candidates = allOutsideResearchGrid.filter((element) => /GridServices/i.test(element.name || ''));
+
+        return {
+            values: new Set(candidates.map((element) => element.getAttribute('item_value'))),
+            sourceCount: candidates.length,
+            sources: candidates.slice(0, 50).map((element) => describeElement(element)),
+            diagnosticOutsideItemValueCount: allOutsideResearchGrid.length,
+            diagnosticOutsideItemValues: allOutsideResearchGrid.slice(0, 50).map((element) => ({
+                itemValue: element.getAttribute('item_value'),
+                element: describeElement(element)
+            }))
+        };
+    };
+
     const describeResearchScope = () => {
         const orderRoot = getResearchOrderRoot();
         const gridRoot = getResearchGridRoot();
         const visibleGrids = getVisibleElements('[name="GridResearch"]').map((grid) => describeElement(grid));
+        const selectedValues = getSelectedOrderItemValues();
         return {
             orderRoot: describeElement(orderRoot === document ? document.body : orderRoot),
             gridRoot: describeElement(gridRoot === document ? document.body : gridRoot),
@@ -3539,7 +3619,13 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             visibleGrids,
             scopedCheckboxCount: getCheckboxes().length,
             globalCheckboxCount: Array.from(document.querySelectorAll(CHECKBOX_SELECTOR))
-                .filter((checkbox) => checkbox.getAttribute('item_value')).length
+                .filter((checkbox) => checkbox.getAttribute('item_value')).length,
+            selectedOrderItemValueCount: selectedValues.values.size,
+            selectedOrderSourceCount: selectedValues.sourceCount,
+            selectedOrderItemValues: Array.from(selectedValues.values),
+            selectedOrderSources: selectedValues.sources,
+            diagnosticOutsideItemValueCount: selectedValues.diagnosticOutsideItemValueCount,
+            diagnosticOutsideItemValues: selectedValues.diagnosticOutsideItemValues
         };
     };
 
@@ -4503,8 +4589,10 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     }
 
     const openAllResult = await openAllResearches();
+    const stableAfterOpenAll = await waitForResearchGridStable();
     debugLog('research_groups:open_all_result', {
         result: openAllResult,
+        stableAfterOpenAll,
         scope: describeResearchScope()
     });
 
@@ -4514,8 +4602,10 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log(`Найдено чек-боксов на текущей странице: ${allCheckboxes.length}`);
 
     const pageSizeResult = await trySetPageSizeTo150();
+    const stableAfterPageSize = await waitForResearchGridStable(1600, 9000);
     debugLog('research_pages:page_size_result', {
         pageSizeResult,
+        stableAfterPageSize,
         scope: describeResearchScope()
     });
     if (pageSizeResult.changed) {
@@ -4527,6 +4617,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
 
     const remainingItemValues = new Set(Object.keys(formData).filter((itemValue) => formData[itemValue] === true || formData[itemValue] === false));
     const processedPages = new Set();
+    const confirmedItemValues = new Set();
 
     while (true) {
         allCheckboxes = getCheckboxes();
@@ -4566,9 +4657,22 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                     console.warn(`Не удалось отметить анализ: ${itemValue}`);
                     continue;
                 }
-                filledCount++;
+                if (!confirmedItemValues.has(itemValue)) {
+                    filledCount++;
+                }
+                confirmedItemValues.add(itemValue);
                 remainingItemValues.delete(itemValue);
-                debugLog('research_checkbox:selected', { itemValue, filledCount, remainingCount: remainingItemValues.size });
+                const selectedOrder = getSelectedOrderItemValues();
+                debugLog('research_checkbox:selected', {
+                    itemValue,
+                    filledCount,
+                    remainingCount: remainingItemValues.size,
+                    selectedOrder: {
+                        count: selectedOrder.values.size,
+                        sourceCount: selectedOrder.sourceCount,
+                        hasItem: selectedOrder.values.has(itemValue)
+                    }
+                });
                 console.log(`✓ Отмечен анализ: ${itemValue}`);
             } else if (shouldBeChecked === false) {
                 const isCleared = await setCheckboxStateThroughBars(itemValue, false);
@@ -4577,10 +4681,58 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                     console.warn(`Не удалось снять анализ: ${itemValue}`);
                     continue;
                 }
-                filledCount++;
+                if (!confirmedItemValues.has(itemValue)) {
+                    filledCount++;
+                }
+                confirmedItemValues.add(itemValue);
                 remainingItemValues.delete(itemValue);
-                debugLog('research_checkbox:cleared', { itemValue, filledCount, remainingCount: remainingItemValues.size });
+                const selectedOrder = getSelectedOrderItemValues();
+                debugLog('research_checkbox:cleared', {
+                    itemValue,
+                    filledCount,
+                    remainingCount: remainingItemValues.size,
+                    selectedOrder: {
+                        count: selectedOrder.values.size,
+                        sourceCount: selectedOrder.sourceCount,
+                        hasItem: selectedOrder.values.has(itemValue)
+                    }
+                });
                 console.log(`✗ Снят анализ: ${itemValue}`);
+            }
+        }
+
+        const selectedOrderAfterPage = getSelectedOrderItemValues();
+        if (selectedOrderAfterPage.sourceCount > 0) {
+            const missingSelectedOnPage = targetItemValues
+                .filter((itemValue) => formData[itemValue] === true)
+                .filter((itemValue) => !selectedOrderAfterPage.values.has(itemValue));
+
+            if (missingSelectedOnPage.length > 0) {
+                debugLog('research_checkbox:order_audit_missing', {
+                    pageInfo,
+                    missingSelectedOnPage,
+                    selectedOrderCount: selectedOrderAfterPage.values.size,
+                    selectedOrderItemValues: Array.from(selectedOrderAfterPage.values)
+                });
+
+                for (const itemValue of missingSelectedOnPage) {
+                    const isSelected = await resyncSelectedCheckboxThroughBars(itemValue);
+                    if (!isSelected) {
+                        remainingItemValues.add(itemValue);
+                        debugLog('research_checkbox:order_audit_retry_failed', { itemValue });
+                        continue;
+                    }
+
+                    if (!confirmedItemValues.has(itemValue)) {
+                        filledCount++;
+                    }
+                    confirmedItemValues.add(itemValue);
+                    remainingItemValues.delete(itemValue);
+                    debugLog('research_checkbox:order_audit_retry_selected', {
+                        itemValue,
+                        selectedOrderCount: getSelectedOrderItemValues().values.size
+                    });
+                }
             }
         }
 
