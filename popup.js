@@ -3718,21 +3718,25 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             };
         }
 
-        const openAllAttempts = [];
+        const readyAttempts = [];
         for (let attempt = 1; attempt <= 3; attempt++) {
             const openAllResult = await openAllResearches();
             const stableAfterOpenAll = await waitForResearchGridStable(1200, 10000);
+            const pageSizeResult = await trySetPageSizeTo150();
+            const stableAfterPageSize = await waitForResearchGridStable(1600, 9000);
             const checkboxCount = getCheckboxes().length;
             const attemptResult = {
                 attempt,
                 openAllResult,
                 stableAfterOpenAll,
+                pageSizeResult,
+                stableAfterPageSize,
                 checkboxCount,
                 scope: describeResearchScope()
             };
 
-            openAllAttempts.push(attemptResult);
-            debugLog('research_groups:open_all_attempt', attemptResult);
+            readyAttempts.push(attemptResult);
+            debugLog('research_order:ready_attempt', attemptResult);
 
             if (checkboxCount > 0) {
                 debugLog('research_groups:open_all_result', {
@@ -3741,58 +3745,50 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                     attempt,
                     scope: describeResearchScope()
                 });
-                break;
+
+                debugLog('research_pages:page_size_result', {
+                    pageSizeResult,
+                    stableAfterPageSize,
+                    scope: describeResearchScope()
+                });
+
+                return {
+                    ready: true,
+                    reason: openResult.reason,
+                    openResult,
+                    openAllAttempts: readyAttempts,
+                    readyAttempts,
+                    pageSizeResult,
+                    stableAfterPageSize,
+                    checkboxCount
+                };
             }
 
             await sleep(700);
         }
 
-        if (getCheckboxes().length === 0) {
-            const lastAttempt = openAllAttempts.at(-1);
-            debugLog('research_groups:open_all_result', {
-                result: lastAttempt?.openAllResult || null,
-                stableAfterOpenAll: lastAttempt?.stableAfterOpenAll || 0,
-                attempt: lastAttempt?.attempt || 0,
-                scope: describeResearchScope()
-            });
-
-            return {
-                ready: false,
-                reason: 'research_rows_not_loaded',
-                openResult,
-                openAllAttempts,
-                pageSizeResult: null,
-                stableAfterPageSize: 0
-            };
-        }
-
-        const pageSizeResult = await trySetPageSizeTo150();
-        const stableAfterPageSize = await waitForResearchGridStable(1600, 9000);
-        debugLog('research_pages:page_size_result', {
-            pageSizeResult,
-            stableAfterPageSize,
+        const lastAttempt = readyAttempts.at(-1);
+        debugLog('research_groups:open_all_result', {
+            result: lastAttempt?.openAllResult || null,
+            stableAfterOpenAll: lastAttempt?.stableAfterOpenAll || 0,
+            attempt: lastAttempt?.attempt || 0,
             scope: describeResearchScope()
         });
 
-        if (getCheckboxes().length === 0) {
-            return {
-                ready: false,
-                reason: 'research_rows_lost_after_page_size',
-                openResult,
-                openAllAttempts,
-                pageSizeResult,
-                stableAfterPageSize
-            };
-        }
+        debugLog('research_pages:page_size_result', {
+            pageSizeResult: lastAttempt?.pageSizeResult || null,
+            stableAfterPageSize: lastAttempt?.stableAfterPageSize || 0,
+            scope: describeResearchScope()
+        });
 
         return {
-            ready: true,
-            reason: openResult.reason,
+            ready: false,
+            reason: 'research_rows_not_loaded',
             openResult,
-            openAllAttempts,
-            pageSizeResult,
-            stableAfterPageSize,
-            checkboxCount: getCheckboxes().length
+            openAllAttempts: readyAttempts,
+            readyAttempts,
+            pageSizeResult: lastAttempt?.pageSizeResult || null,
+            stableAfterPageSize: lastAttempt?.stableAfterPageSize || 0
         };
     };
 
