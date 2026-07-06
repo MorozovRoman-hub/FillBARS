@@ -2679,6 +2679,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
     
     let filledCount = 0;
+    let useConservativeSelectionDelay = false;
 
     const CHECKBOX_SELECTOR = 'input[name="GridResearch_SelectList_Item"]';
     const TARGET_PAGE_SIZE = 150;
@@ -2765,14 +2766,26 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     const waitForBarsToProcessSelection = async (itemValue, desiredState) => {
         const startedAt = Date.now();
 
-        while (Date.now() - startedAt < 3000) {
-            await sleep(180);
+        const timeout = useConservativeSelectionDelay ? 5000 : 3000;
+        const interval = useConservativeSelectionDelay ? 260 : 180;
+
+        while (Date.now() - startedAt < timeout) {
+            await sleep(interval);
 
             const checkbox = findCheckboxByItemValue(itemValue);
             const selectedValues = getSelectedOrderItemValues();
             const checkboxMatches = !!checkbox && checkbox.checked === desiredState;
-            const selectedListMatches = selectedValues.sourceCount === 0
-                || selectedValues.values.has(itemValue) === desiredState;
+
+            if (checkboxMatches && selectedValues.sourceCount === 0) {
+                await sleep(useConservativeSelectionDelay ? 900 : 350);
+                const refreshedCheckbox = findCheckboxByItemValue(itemValue);
+                if (refreshedCheckbox?.checked === desiredState) {
+                    return true;
+                }
+                continue;
+            }
+
+            const selectedListMatches = selectedValues.values.has(itemValue) === desiredState;
 
             if (checkboxMatches && selectedListMatches) {
                 return true;
@@ -3668,6 +3681,29 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             diagnosticOutsideItemValueCount: selectedValues.diagnosticOutsideItemValueCount,
             diagnosticOutsideItemValues: selectedValues.diagnosticOutsideItemValues
         };
+    };
+
+    const describeOrderGridSnapshots = () => {
+        const orderRoot = getResearchOrderRoot();
+        return getVisibleElements('.grid, .selected_values, [name*="Grid"], table', orderRoot || document)
+            .filter((element) => !getResearchGridRoot().contains(element) || element === getResearchGridRoot())
+            .slice(0, 30)
+            .map((element) => {
+                const checkboxes = Array.from(element.querySelectorAll('input[type="checkbox"]'));
+                return {
+                    element: describeElement(element),
+                    checkboxCount: checkboxes.length,
+                    checkedCount: checkboxes.filter((checkbox) => checkbox.checked).length,
+                    itemValues: Array.from(element.querySelectorAll('[item_value]'))
+                        .slice(0, 80)
+                        .map((item) => ({
+                            name: item.name || '',
+                            itemValue: item.getAttribute('item_value'),
+                            checked: 'checked' in item ? item.checked : undefined,
+                            text: getElementLabel(item)
+                        }))
+                };
+            });
     };
 
     const findScheduleForm = () => {
@@ -4605,7 +4641,9 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     };
     
     const labOpenResult = await openLabFromPatientCard();
+    useConservativeSelectionDelay = labOpenResult.opened === true;
     debugLog('lab_open:result', labOpenResult);
+    debugLog('selection_mode', { useConservativeSelectionDelay });
     debugLog('research_scope:after_lab_open', describeResearchScope());
 
     if (!labOpenResult.opened && labOpenResult.reason !== 'already_open') {
@@ -4811,7 +4849,8 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         pagesProcessed: processedPages.size,
         missingCount: remainingItemValues.size,
         missingItemValues: Array.from(remainingItemValues),
-        finalScope: describeResearchScope()
+        finalScope: describeResearchScope(),
+        finalOrderGridSnapshots: describeOrderGridSnapshots()
     });
     console.log(message);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
