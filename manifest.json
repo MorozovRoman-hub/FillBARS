@@ -5,7 +5,8 @@
   "description": "Автоматическое назначение анализов в МИС БАРС с выбором профилей",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "downloads"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -2524,6 +2524,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
+function sanitizeLogFilePart(value) {
+    return String(value || '')
+        .replace(/[\\/:*?"<>|]+/g, '_')
+        .replace(/\s+/g, '_')
+        .slice(0, 80) || 'unknown';
+}
+
+function downloadFillBarsLog(payload, profileName) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `fillbars-log-${timestamp}-${sanitizeLogFilePart(profileName)}.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    if (chrome.downloads?.download) {
+        chrome.downloads.download({
+            url,
+            filename,
+            saveAs: false
+        }, () => {
+            URL.revokeObjectURL(url);
+            if (chrome.runtime.lastError) {
+                console.warn('[FillBARS] Не удалось скачать лог', chrome.runtime.lastError.message);
+            } else {
+                console.log(`[FillBARS] Лог сохранён: ${filename}`);
+            }
+        });
+        return filename;
+    }
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return filename;
+}
+
 // Обработчик кнопки "Заполнить форму"
 document.getElementById('fillForm').addEventListener('click', () => {
     const select = document.getElementById('profileSelect');
@@ -2569,8 +2606,35 @@ document.getElementById('fillForm').addEventListener('click', () => {
             func: fillForm,
             args: [formData, selectedProfile, assignmentSettings]
         }, (results) => {
-            if (chrome.runtime.lastError) {
-                statusDiv.textContent = `❌ Ошибка: ${chrome.runtime.lastError.message}`;
+            const executeError = chrome.runtime.lastError?.message || null;
+            const logPayload = {
+                createdAt: new Date().toISOString(),
+                extensionVersion: '5.0',
+                profileName: selectedProfile,
+                targetTab: {
+                    id: tabs[0].id,
+                    title: tabs[0].title,
+                    url: tabs[0].url
+                },
+                assignmentSettings,
+                requestedAnalyses: {
+                    total: Object.keys(formData).length,
+                    selected: Object.values(formData).filter((value) => value === true).length,
+                    cleared: Object.values(formData).filter((value) => value === false).length,
+                    itemValues: Object.keys(formData)
+                },
+                chromeLastError: executeError,
+                frameResults: (results || []).map((entry) => ({
+                    frameId: entry?.frameId,
+                    documentId: entry?.documentId,
+                    result: entry?.result || null
+                }))
+            };
+
+            const savedLogName = downloadFillBarsLog(logPayload, selectedProfile);
+
+            if (executeError) {
+                statusDiv.textContent = `❌ Ошибка: ${executeError}. Лог: ${savedLogName}`;
                 statusDiv.style.color = '#f44336';
             } else if (results && results.length) {
                 const successfulResults = results
@@ -2580,16 +2644,16 @@ document.getElementById('fillForm').addEventListener('click', () => {
                     || successfulResults[0];
 
                 if (!result) {
-                    statusDiv.textContent = '❌ Не найдена карточка пациента или форма лаборатории БАРС';
+                    statusDiv.textContent = `❌ Не найдена карточка пациента или форма лаборатории БАРС. Лог: ${savedLogName}`;
                     statusDiv.style.color = '#f44336';
                     fillButton.disabled = false;
                     return;
                 }
 
-                statusDiv.textContent = `✅ ${result.message}`;
+                statusDiv.textContent = `✅ ${result.message}. Лог: ${savedLogName}`;
                 statusDiv.style.color = '#4CAF50';
             } else {
-                statusDiv.textContent = '✅ Заполнение выполнено';
+                statusDiv.textContent = `✅ Заполнение выполнено. Лог: ${savedLogName}`;
                 statusDiv.style.color = '#4CAF50';
             }
 
@@ -3085,11 +3149,19 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return entry;
     };
 
+    const getRequestedItemValues = () => Object.keys(formData).filter((itemValue) => formData[itemValue] === true || formData[itemValue] === false);
+
     debugLog('fill:start', {
         profileName,
         assignmentStage: normalizedAssignmentStage,
         targetCabinetName,
-        shouldMarkUrgent
+        shouldMarkUrgent,
+        location: window.location.href,
+        title: document.title,
+        requestedTotal: getRequestedItemValues().length,
+        requestedSelected: Object.values(formData).filter((value) => value === true).length,
+        requestedCleared: Object.values(formData).filter((value) => value === false).length,
+        requestedItemValues: getRequestedItemValues()
     });
     console.log('FillBARS debug: copy(document.getElementById("fillbars-debug-logs")?.textContent || sessionStorage.getItem("FillBARS.debugLogs") || "нет логов")');
 
@@ -3454,6 +3526,21 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         const orderRoot = getResearchOrderRoot();
         const grid = orderRoot?.querySelector('[name="GridResearch"]');
         return grid || orderRoot || document;
+    };
+
+    const describeResearchScope = () => {
+        const orderRoot = getResearchOrderRoot();
+        const gridRoot = getResearchGridRoot();
+        const visibleGrids = getVisibleElements('[name="GridResearch"]').map((grid) => describeElement(grid));
+        return {
+            orderRoot: describeElement(orderRoot === document ? document.body : orderRoot),
+            gridRoot: describeElement(gridRoot === document ? document.body : gridRoot),
+            visibleGridCount: visibleGrids.length,
+            visibleGrids,
+            scopedCheckboxCount: getCheckboxes().length,
+            globalCheckboxCount: Array.from(document.querySelectorAll(CHECKBOX_SELECTOR))
+                .filter((checkbox) => checkbox.getAttribute('item_value')).length
+        };
     };
 
     const findScheduleForm = () => {
@@ -4392,20 +4479,34 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     
     const labOpenResult = await openLabFromPatientCard();
     debugLog('lab_open:result', labOpenResult);
+    debugLog('research_scope:after_lab_open', describeResearchScope());
 
     if (!labOpenResult.opened && labOpenResult.reason !== 'already_open') {
         if (labOpenResult.reason === 'no_patient_context') {
-            return { skipped: true, message: 'Нет контекста пациента БАРС в этом фрейме', filledCount: 0, totalFound: 0 };
+            debugLog('fill:skipped', { reason: labOpenResult.reason });
+            return {
+                skipped: true,
+                message: 'Нет контекста пациента БАРС в этом фрейме',
+                filledCount: 0,
+                totalFound: 0,
+                debugLogs: window[DEBUG_LOG_KEY] || []
+            };
         }
 
+        debugLog('fill:failed_to_open_lab', { reason: labOpenResult.reason });
         return {
             message: `Не удалось открыть лабораторию из карточки пациента (${labOpenResult.reason})`,
             filledCount: 0,
-            totalFound: 0
+            totalFound: 0,
+            debugLogs: window[DEBUG_LOG_KEY] || []
         };
     }
 
-    await openAllResearches();
+    const openAllResult = await openAllResearches();
+    debugLog('research_groups:open_all_result', {
+        result: openAllResult,
+        scope: describeResearchScope()
+    });
 
     // Проверяем количество чек-боксов на первой странице.
     let allCheckboxes = getCheckboxes();
@@ -4413,6 +4514,10 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log(`Найдено чек-боксов на текущей странице: ${allCheckboxes.length}`);
 
     const pageSizeResult = await trySetPageSizeTo150();
+    debugLog('research_pages:page_size_result', {
+        pageSizeResult,
+        scope: describeResearchScope()
+    });
     if (pageSizeResult.changed) {
         console.log(`Количество записей автоматически переключено на ${TARGET_PAGE_SIZE}. Текущих чек-боксов: ${pageSizeResult.count}`);
         allCheckboxes = getCheckboxes();
@@ -4445,7 +4550,9 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             pageInfo,
             visibleCount: allCheckboxes.length,
             targetCount: targetItemValues.length,
-            remainingCount: remainingItemValues.size
+            remainingCount: remainingItemValues.size,
+            targetItemValues,
+            visibleItemValues: allCheckboxes.map((checkbox) => checkbox.getAttribute('item_value'))
         });
 
         // Проставляем чек-боксы последовательно, чтобы БАРС успевал обновить нижний список выбранных исследований.
@@ -4455,20 +4562,24 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             if (shouldBeChecked === true) {
                 const isSelected = await resyncSelectedCheckboxThroughBars(itemValue);
                 if (!isSelected) {
+                    debugLog('research_checkbox:select_failed', { itemValue });
                     console.warn(`Не удалось отметить анализ: ${itemValue}`);
                     continue;
                 }
                 filledCount++;
                 remainingItemValues.delete(itemValue);
+                debugLog('research_checkbox:selected', { itemValue, filledCount, remainingCount: remainingItemValues.size });
                 console.log(`✓ Отмечен анализ: ${itemValue}`);
             } else if (shouldBeChecked === false) {
                 const isCleared = await setCheckboxStateThroughBars(itemValue, false);
                 if (!isCleared) {
+                    debugLog('research_checkbox:clear_failed', { itemValue });
                     console.warn(`Не удалось снять анализ: ${itemValue}`);
                     continue;
                 }
                 filledCount++;
                 remainingItemValues.delete(itemValue);
+                debugLog('research_checkbox:cleared', { itemValue, filledCount, remainingCount: remainingItemValues.size });
                 console.log(`✗ Снят анализ: ${itemValue}`);
             }
         }
@@ -4500,6 +4611,15 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     }
     
     const message = `Профиль "${profileName}": обработано ${filledCount} анализов (просмотрено страниц: ${processedPages.size})${scheduleMessage ? `. ${scheduleMessage}` : ''}`;
+    debugLog('fill:complete', {
+        message,
+        filledCount,
+        totalFound,
+        pagesProcessed: processedPages.size,
+        missingCount: remainingItemValues.size,
+        missingItemValues: Array.from(remainingItemValues),
+        finalScope: describeResearchScope()
+    });
     console.log(message);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     
@@ -4534,5 +4654,13 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         notification.remove();
     }, 5000);
     
-    return { message, filledCount, totalFound, pagesProcessed: processedPages.size, missingCount: remainingItemValues.size };
+    return {
+        message,
+        filledCount,
+        totalFound,
+        pagesProcessed: processedPages.size,
+        missingCount: remainingItemValues.size,
+        missingItemValues: Array.from(remainingItemValues),
+        debugLogs: window[DEBUG_LOG_KEY] || []
+    };
 }
