@@ -2056,7 +2056,8 @@ async function readResearchesFromPage() {
     const TARGET_PAGE_SIZE = 150;
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR));
+    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR))
+        .filter((checkbox) => checkbox.getAttribute('item_value'));
     const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const normalizeLabel = (value) => normalizeText(value).toLowerCase();
 
@@ -2563,15 +2564,28 @@ document.getElementById('fillForm').addEventListener('click', () => {
         }
 
         chrome.scripting.executeScript({
-            target: { tabId: tabs[0].id },
+            target: { tabId: tabs[0].id, allFrames: true },
+            world: 'MAIN',
             func: fillForm,
             args: [formData, selectedProfile, assignmentSettings]
         }, (results) => {
             if (chrome.runtime.lastError) {
                 statusDiv.textContent = `❌ Ошибка: ${chrome.runtime.lastError.message}`;
                 statusDiv.style.color = '#f44336';
-            } else if (results && results[0] && results[0].result) {
-                const result = results[0].result;
+            } else if (results && results.length) {
+                const successfulResults = results
+                    .map((entry) => entry?.result)
+                    .filter((result) => result && !result.skipped);
+                const result = successfulResults.find((entry) => entry.filledCount > 0 || entry.totalFound > 0)
+                    || successfulResults[0];
+
+                if (!result) {
+                    statusDiv.textContent = '❌ Не найдена карточка пациента или форма лаборатории БАРС';
+                    statusDiv.style.color = '#f44336';
+                    fillButton.disabled = false;
+                    return;
+                }
+
                 statusDiv.textContent = `✅ ${result.message}`;
                 statusDiv.style.color = '#4CAF50';
             } else {
@@ -2596,7 +2610,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log("╔════════════════════════════════════════════════════════════╗");
     console.log("║  МИС БАРС - Автоматическое назначение анализов           ║");
     console.log("║  Разработчик: MorozovRV and Bitucckii VA                 ║");
-    console.log("║  Версия: 4.3                                              ║");
+    console.log("║  Версия: 5.0                                              ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
     
@@ -2614,7 +2628,8 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR));
+    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR))
+        .filter((checkbox) => checkbox.getAttribute('item_value'));
 
     const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
@@ -3081,6 +3096,193 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return Array.from(root.querySelectorAll(selector)).filter(isVisible);
     };
 
+    const getTopWindow = () => {
+        try {
+            return window.top || window;
+        } catch (error) {
+            return window;
+        }
+    };
+
+    const readBarsVar = (name, fromParent = false) => {
+        const candidates = fromParent
+            ? [window, window.parent, getTopWindow()]
+            : [window, getTopWindow()];
+
+        for (const candidate of candidates) {
+            try {
+                if (candidate && typeof candidate.getVar === 'function') {
+                    const values = fromParent
+                        ? [candidate.getVar(name, 1), candidate.getVar(name)]
+                        : [candidate.getVar(name), candidate.getVar(name, 1)];
+
+                    for (const value of values) {
+                        if (value !== undefined && value !== null && String(value).trim() !== '') {
+                            return value;
+                        }
+                    }
+                }
+            } catch (error) {
+                // Some frames can be inaccessible; continue with the next context.
+            }
+        }
+
+        return '';
+    };
+
+    const hasPatientContextForLab = () => {
+        return !!readBarsVar('PERSMEDCARD', true);
+    };
+
+    const isResearchOrderFormOpen = () => {
+        return !!document.querySelector('.dirline_order_alt, [name="GridResearch"]');
+    };
+
+    const getSameOriginContexts = () => {
+        return [window, window.parent, getTopWindow()]
+            .filter((candidate, index, list) => candidate && list.indexOf(candidate) === index);
+    };
+
+    const findOpenLabButton = () => {
+        return getVisibleElements('button, input[type="button"], input[type="submit"], a, span, div')
+            .filter((element) => {
+                const label = getElementLabel(element);
+                const name = normalizeText(element.getAttribute('name'));
+                return (name === 'btnopenlabmedanalizenew1' || name === 'btnopenlabmedanalizenew')
+                    || (label.includes('направление на исследование') && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0)
+                    || (label.includes('направление на анализ') && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0);
+            })
+            .sort((left, right) => {
+                const score = (element) => {
+                    const label = getElementLabel(element);
+                    const name = normalizeText(element.getAttribute('name'));
+                    return (name.includes('btnopenlabmed') ? 1000 : 0)
+                        + (label === 'направление на исследование' ? 500 : 0)
+                        + (label.includes('направление на исследование') ? 200 : 0);
+                };
+                return score(right) - score(left);
+            })[0] || null;
+    };
+
+    const openResearchOrderViaApi = () => {
+        const persmedcardId = readBarsVar('PERSMEDCARD', true);
+
+        if (!persmedcardId) {
+            return false;
+        }
+
+        for (const context of getSameOriginContexts()) {
+            try {
+                if (typeof context.openD3Form === 'function') {
+                    context.openD3Form('Lis/Dirline/dirline_order_alt', true, {
+                        width: '100%',
+                        height: '100%',
+                        vars: {
+                            PATIENT: persmedcardId,
+                            DISEASECASE: readBarsVar('DISEASECASE', false),
+                            HH_DEP_ID: readBarsVar('HH_DEP_ID', true),
+                            ACTIVE_CHECK_DIR: true,
+                            ACTIVE_CHECK_SCH: true,
+                            DISEASE_HISTORY_PK_ID: readBarsVar('DISEASE_HISTORY_PK_ID', false)
+                        }
+                    });
+                    return true;
+                }
+            } catch (error) {
+                console.warn('[FillBARS] Не удалось открыть заказ исследований через openD3Form', error);
+            }
+        }
+
+        for (const context of getSameOriginContexts()) {
+            try {
+                if (typeof context.openWindow === 'function') {
+                    context.openWindow({
+                        name: 'Labmed/labmed_analize_new',
+                        vars: {
+                            PERSMEDCARD_ID: persmedcardId,
+                            DISEASECASE: readBarsVar('DISEASECASE', false),
+                            HH_DEP: readBarsVar('HH_DEP_ID', true)
+                        }
+                    }, true, 1100, 768);
+                    return true;
+                }
+            } catch (error) {
+                console.warn('[FillBARS] Не удалось открыть лабораторию через openWindow', error);
+            }
+        }
+
+        return false;
+    };
+
+    const findLabHistoryLink = () => {
+        return getVisibleElements('span, a, td, div')
+            .filter((element) => {
+                const label = getElementLabel(element);
+                const onclick = normalizeText(element.getAttribute('onclick'));
+                return label.includes('лабораторные исследования')
+                    && onclick.includes('openonlinkwindow')
+                    && onclick.includes('analyses');
+            })[0] || null;
+    };
+
+    const openResearchOrderByClicks = async () => {
+        const existingDirectionButton = findOpenLabButton();
+        if (existingDirectionButton) {
+            debugLog('lab_open:button_click', { button: describeElement(existingDirectionButton) });
+            clickElement(existingDirectionButton, false);
+            return !!await waitForCondition(isResearchOrderFormOpen, 15000, 300);
+        }
+
+        const labHistoryLink = findLabHistoryLink();
+        if (!labHistoryLink) {
+            return false;
+        }
+
+        debugLog('lab_open:history_link_click', { link: describeElement(labHistoryLink) });
+        clickElement(labHistoryLink, false);
+
+        const directionButton = await waitForCondition(findOpenLabButton, 8000, 250);
+        if (!directionButton) {
+            return false;
+        }
+
+        debugLog('lab_open:direction_button_click', { button: describeElement(directionButton) });
+        clickElement(directionButton, false);
+        return !!await waitForCondition(isResearchOrderFormOpen, 15000, 300);
+    };
+
+    const openLabFromPatientCard = async () => {
+        if (isResearchOrderFormOpen()) {
+            return { opened: false, reason: 'already_open' };
+        }
+
+        if (!hasPatientContextForLab()) {
+            return { opened: false, reason: 'no_patient_context' };
+        }
+
+        const topWindow = getTopWindow();
+        try {
+            if (topWindow.__FillBARS_OPENING_LAB_LOCK && Date.now() - topWindow.__FillBARS_OPENING_LAB_LOCK < 15000) {
+                await waitForCondition(isResearchOrderFormOpen, 15000, 300);
+                return { opened: isResearchOrderFormOpen(), reason: 'waited_existing_open' };
+            }
+            topWindow.__FillBARS_OPENING_LAB_LOCK = Date.now();
+        } catch (error) {
+            // Cross-frame lock is best-effort only.
+        }
+
+        if (await openResearchOrderByClicks()) {
+            debugLog('lab_open:click_path');
+        } else if (openResearchOrderViaApi()) {
+            debugLog('lab_open:api_call');
+        } else {
+            return { opened: false, reason: 'no_open_method' };
+        }
+
+        const opened = await waitForCondition(isResearchOrderFormOpen, 20000, 300);
+        return { opened: !!opened, reason: opened ? 'opened' : 'timeout' };
+    };
+
     const isVisibleOrInsideVisibleControl = (element) => {
         if (!element || !element.isConnected) {
             return false;
@@ -3158,6 +3360,46 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         }
 
         return null;
+    };
+
+    const getCurrentResearchPageInfo = () => {
+        const grid = document.querySelector('[name="GridResearch"]');
+        const rangeText = normalizeText((grid || document).querySelector('[name="rangeResearch"], .ctrl_range')?.innerText || '');
+        const match = rangeText.match(/стр\.\s*(\d+)\s*из\s*(\d+)/i);
+
+        return {
+            current: match ? Number.parseInt(match[1], 10) : 1,
+            total: match ? Number.parseInt(match[2], 10) : 1,
+            text: rangeText
+        };
+    };
+
+    const clickNextResearchPage = async () => {
+        const pageInfo = getCurrentResearchPageInfo();
+        if (pageInfo.current >= pageInfo.total) {
+            return false;
+        }
+
+        const grid = document.querySelector('[name="GridResearch"]') || document;
+        const nextButton = Array.from(grid.querySelectorAll('.ctrl_range_go_next, [onclick*="RangeCtrl.go"]'))
+            .filter((element) => isVisible(element) && String(element.getAttribute('onclick') || '').includes(',1'))
+            .sort((left, right) => right.getBoundingClientRect().left - left.getBoundingClientRect().left)[0];
+
+        if (!nextButton) {
+            return false;
+        }
+
+        const previousValues = getCheckboxes().map((checkbox) => checkbox.getAttribute('item_value')).join(';');
+        clickElement(nextButton, false);
+
+        await waitForCondition(() => {
+            const nextInfo = getCurrentResearchPageInfo();
+            const nextValues = getCheckboxes().map((checkbox) => checkbox.getAttribute('item_value')).join(';');
+            return nextInfo.current > pageInfo.current || (nextValues && nextValues !== previousValues);
+        }, 8000, 250);
+
+        await waitForCheckboxesToSettle();
+        return true;
     };
 
     const getZIndex = (element) => {
@@ -4127,70 +4369,101 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return `подбор времени подготовлен (${resultMessage})`;
     };
     
+    const labOpenResult = await openLabFromPatientCard();
+    debugLog('lab_open:result', labOpenResult);
+
+    if (!labOpenResult.opened && labOpenResult.reason !== 'already_open') {
+        if (labOpenResult.reason === 'no_patient_context') {
+            return { skipped: true, message: 'Нет контекста пациента БАРС в этом фрейме', filledCount: 0, totalFound: 0 };
+        }
+
+        return {
+            message: `Не удалось открыть лабораторию из карточки пациента (${labOpenResult.reason})`,
+            filledCount: 0,
+            totalFound: 0
+        };
+    }
+
     await openAllResearches();
 
-    // Проверяем количество чек-боксов
+    // Проверяем количество чек-боксов на первой странице.
     let allCheckboxes = getCheckboxes();
-    console.log(`Найдено чек-боксов: ${allCheckboxes.length}`);
+    let totalFound = 0;
+    console.log(`Найдено чек-боксов на текущей странице: ${allCheckboxes.length}`);
 
     const pageSizeResult = await trySetPageSizeTo150();
     if (pageSizeResult.changed) {
         console.log(`Количество записей автоматически переключено на ${TARGET_PAGE_SIZE}. Текущих чек-боксов: ${pageSizeResult.count}`);
         allCheckboxes = getCheckboxes();
     } else if (pageSizeResult.reason === 'not_found') {
-        console.warn('Не удалось автоматически найти переключатель количества записей.');
+        console.warn('Не удалось автоматически найти переключатель количества записей. Продолжаю с постраничным обходом.');
     }
-    
-    // Если найдено меньше 100 записей, показываем предупреждение
-    if (allCheckboxes.length < 100) {
-        const warningMsg = `⚠️ Внимание! Найдено только ${allCheckboxes.length} анализов. Автоматически выставить 150 записей не удалось. Установите отображение 150 записей вручную (нажмите на цифру в правом нижнем углу, введите 150 и нажмите Enter).`;
-        console.warn(warningMsg);
-        
-        // Показываем предупреждение на странице
-        const notification = document.createElement('div');
-        notification.textContent = warningMsg;
-        notification.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #ff9800;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-family: 'Segoe UI', sans-serif;
-            z-index: 9999;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            max-width: 350px;
-        `;
-        document.body.appendChild(notification);
-        setTimeout(() => notification.remove(), 8000);
-    }
-    
-    const targetItemValues = allCheckboxes
-        .map((checkbox) => checkbox.getAttribute('item_value'))
-        .filter((itemValue) => itemValue && formData.hasOwnProperty(itemValue));
 
-    // Проставляем чек-боксы последовательно, чтобы БАРС успевал обновить нижний список выбранных исследований.
-    for (const itemValue of targetItemValues) {
-        const shouldBeChecked = formData[itemValue];
+    const remainingItemValues = new Set(Object.keys(formData).filter((itemValue) => formData[itemValue] === true || formData[itemValue] === false));
+    const processedPages = new Set();
 
-        if (shouldBeChecked === true) {
-            const isSelected = await resyncSelectedCheckboxThroughBars(itemValue);
-            if (!isSelected) {
-                console.warn(`Не удалось отметить анализ: ${itemValue}`);
-                continue;
+    while (true) {
+        allCheckboxes = getCheckboxes();
+        totalFound += allCheckboxes.length;
+
+        const pageInfo = getCurrentResearchPageInfo();
+        const currentValues = allCheckboxes.map((checkbox) => checkbox.getAttribute('item_value')).join(';');
+        const pageKey = `${pageInfo.current}/${pageInfo.total}:${currentValues}`;
+
+        if (processedPages.has(pageKey)) {
+            debugLog('research_pages:repeat_stop', { pageInfo, currentValues });
+            break;
+        }
+        processedPages.add(pageKey);
+
+        const targetItemValues = allCheckboxes
+            .map((checkbox) => checkbox.getAttribute('item_value'))
+            .filter((itemValue) => itemValue && remainingItemValues.has(itemValue));
+
+        debugLog('research_pages:process', {
+            pageInfo,
+            visibleCount: allCheckboxes.length,
+            targetCount: targetItemValues.length,
+            remainingCount: remainingItemValues.size
+        });
+
+        // Проставляем чек-боксы последовательно, чтобы БАРС успевал обновить нижний список выбранных исследований.
+        for (const itemValue of targetItemValues) {
+            const shouldBeChecked = formData[itemValue];
+
+            if (shouldBeChecked === true) {
+                const isSelected = await resyncSelectedCheckboxThroughBars(itemValue);
+                if (!isSelected) {
+                    console.warn(`Не удалось отметить анализ: ${itemValue}`);
+                    continue;
+                }
+                filledCount++;
+                remainingItemValues.delete(itemValue);
+                console.log(`✓ Отмечен анализ: ${itemValue}`);
+            } else if (shouldBeChecked === false) {
+                const isCleared = await setCheckboxStateThroughBars(itemValue, false);
+                if (!isCleared) {
+                    console.warn(`Не удалось снять анализ: ${itemValue}`);
+                    continue;
+                }
+                filledCount++;
+                remainingItemValues.delete(itemValue);
+                console.log(`✗ Снят анализ: ${itemValue}`);
             }
-            filledCount++;
-            console.log(`✓ Отмечен анализ: ${itemValue}`);
-        } else if (shouldBeChecked === false) {
-            const isCleared = await setCheckboxStateThroughBars(itemValue, false);
-            if (!isCleared) {
-                console.warn(`Не удалось снять анализ: ${itemValue}`);
-                continue;
-            }
-            filledCount++;
-            console.log(`✗ Снят анализ: ${itemValue}`);
+        }
+
+        if (remainingItemValues.size === 0) {
+            break;
+        }
+
+        const pageInfoAfterSelection = getCurrentResearchPageInfo();
+        if (pageInfoAfterSelection.current >= pageInfoAfterSelection.total) {
+            break;
+        }
+
+        if (!await clickNextResearchPage()) {
+            console.warn('Не удалось перейти на следующую страницу исследований.');
+            break;
         }
     }
 
@@ -4205,14 +4478,16 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         console.warn('Анализы не были обработаны, кнопку "Назначить" не нажимаю.');
     }
     
-    const message = `Профиль "${profileName}": обработано ${filledCount} анализов (всего на странице: ${allCheckboxes.length})${scheduleMessage ? `. ${scheduleMessage}` : ''}`;
+    const message = `Профиль "${profileName}": обработано ${filledCount} анализов (просмотрено страниц: ${processedPages.size})${scheduleMessage ? `. ${scheduleMessage}` : ''}`;
     console.log(message);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     
     // Показываем уведомление о результате
     const notification = document.createElement('div');
-    const isFullList = allCheckboxes.length >= 100;
-    notification.textContent = isFullList ? `✅ ${message}` : `⚠️ ${message}\n⚠️ Для полного списка установите 150 записей!`;
+    const isFullList = remainingItemValues.size === 0 || filledCount > 0;
+    notification.textContent = remainingItemValues.size === 0
+        ? `✅ ${message}`
+        : `⚠️ ${message}\nНе найдено в списке: ${remainingItemValues.size}`;
     notification.style.cssText = `
         position: fixed;
         bottom: 20px;
@@ -4238,5 +4513,5 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         notification.remove();
     }, 5000);
     
-    return { message, filledCount, totalFound: allCheckboxes.length };
+    return { message, filledCount, totalFound, pagesProcessed: processedPages.size, missingCount: remainingItemValues.size };
 }
