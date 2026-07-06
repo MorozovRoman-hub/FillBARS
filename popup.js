@@ -2679,7 +2679,6 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
     
     let filledCount = 0;
-    let useConservativeSelectionDelay = false;
 
     const CHECKBOX_SELECTOR = 'input[name="GridResearch_SelectList_Item"]';
     const TARGET_PAGE_SIZE = 150;
@@ -2766,18 +2765,15 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     const waitForBarsToProcessSelection = async (itemValue, desiredState) => {
         const startedAt = Date.now();
 
-        const timeout = useConservativeSelectionDelay ? 5000 : 3000;
-        const interval = useConservativeSelectionDelay ? 260 : 180;
-
-        while (Date.now() - startedAt < timeout) {
-            await sleep(interval);
+        while (Date.now() - startedAt < 3000) {
+            await sleep(180);
 
             const checkbox = findCheckboxByItemValue(itemValue);
             const selectedValues = getSelectedOrderItemValues();
             const checkboxMatches = !!checkbox && checkbox.checked === desiredState;
 
             if (checkboxMatches && selectedValues.sourceCount === 0) {
-                await sleep(useConservativeSelectionDelay ? 900 : 350);
+                await sleep(350);
                 const refreshedCheckbox = findCheckboxByItemValue(itemValue);
                 if (refreshedCheckbox?.checked === desiredState) {
                     return true;
@@ -3704,6 +3700,100 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                         }))
                 };
             });
+    };
+
+    const ensureResearchOrderFormReady = async () => {
+        const openResult = await openLabFromPatientCard();
+        debugLog('lab_open:result', openResult);
+        debugLog('research_scope:after_lab_open', describeResearchScope());
+
+        if (!openResult.opened && openResult.reason !== 'already_open') {
+            return {
+                ready: false,
+                reason: openResult.reason,
+                openResult,
+                openAllAttempts: [],
+                pageSizeResult: null,
+                stableAfterPageSize: 0
+            };
+        }
+
+        const openAllAttempts = [];
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const openAllResult = await openAllResearches();
+            const stableAfterOpenAll = await waitForResearchGridStable(1200, 10000);
+            const checkboxCount = getCheckboxes().length;
+            const attemptResult = {
+                attempt,
+                openAllResult,
+                stableAfterOpenAll,
+                checkboxCount,
+                scope: describeResearchScope()
+            };
+
+            openAllAttempts.push(attemptResult);
+            debugLog('research_groups:open_all_attempt', attemptResult);
+
+            if (checkboxCount > 0) {
+                debugLog('research_groups:open_all_result', {
+                    result: openAllResult,
+                    stableAfterOpenAll,
+                    attempt,
+                    scope: describeResearchScope()
+                });
+                break;
+            }
+
+            await sleep(700);
+        }
+
+        if (getCheckboxes().length === 0) {
+            const lastAttempt = openAllAttempts.at(-1);
+            debugLog('research_groups:open_all_result', {
+                result: lastAttempt?.openAllResult || null,
+                stableAfterOpenAll: lastAttempt?.stableAfterOpenAll || 0,
+                attempt: lastAttempt?.attempt || 0,
+                scope: describeResearchScope()
+            });
+
+            return {
+                ready: false,
+                reason: 'research_rows_not_loaded',
+                openResult,
+                openAllAttempts,
+                pageSizeResult: null,
+                stableAfterPageSize: 0
+            };
+        }
+
+        const pageSizeResult = await trySetPageSizeTo150();
+        const stableAfterPageSize = await waitForResearchGridStable(1600, 9000);
+        debugLog('research_pages:page_size_result', {
+            pageSizeResult,
+            stableAfterPageSize,
+            scope: describeResearchScope()
+        });
+
+        if (getCheckboxes().length === 0) {
+            return {
+                ready: false,
+                reason: 'research_rows_lost_after_page_size',
+                openResult,
+                openAllAttempts,
+                pageSizeResult,
+                stableAfterPageSize
+            };
+        }
+
+        return {
+            ready: true,
+            reason: openResult.reason,
+            openResult,
+            openAllAttempts,
+            pageSizeResult,
+            stableAfterPageSize,
+            checkboxCount: getCheckboxes().length
+        };
     };
 
     const findScheduleForm = () => {
@@ -4640,15 +4730,12 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return `подбор времени подготовлен (${resultMessage})`;
     };
     
-    const labOpenResult = await openLabFromPatientCard();
-    useConservativeSelectionDelay = labOpenResult.opened === true;
-    debugLog('lab_open:result', labOpenResult);
-    debugLog('selection_mode', { useConservativeSelectionDelay });
-    debugLog('research_scope:after_lab_open', describeResearchScope());
+    const orderReadyResult = await ensureResearchOrderFormReady();
+    debugLog('research_order:ready_result', orderReadyResult);
 
-    if (!labOpenResult.opened && labOpenResult.reason !== 'already_open') {
-        if (labOpenResult.reason === 'no_patient_context') {
-            debugLog('fill:skipped', { reason: labOpenResult.reason });
+    if (!orderReadyResult.ready) {
+        if (orderReadyResult.reason === 'no_patient_context') {
+            debugLog('fill:skipped', { reason: orderReadyResult.reason });
             return {
                 skipped: true,
                 message: 'Нет контекста пациента БАРС в этом фрейме',
@@ -4658,39 +4745,24 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             };
         }
 
-        debugLog('fill:failed_to_open_lab', { reason: labOpenResult.reason });
+        debugLog('fill:research_order_not_ready', orderReadyResult);
         return {
-            message: `Не удалось открыть лабораторию из карточки пациента (${labOpenResult.reason})`,
+            message: `Форма заказа исследований не готова (${orderReadyResult.reason})`,
             filledCount: 0,
             totalFound: 0,
             debugLogs: window[DEBUG_LOG_KEY] || []
         };
     }
 
-    const openAllResult = await openAllResearches();
-    const stableAfterOpenAll = await waitForResearchGridStable();
-    debugLog('research_groups:open_all_result', {
-        result: openAllResult,
-        stableAfterOpenAll,
-        scope: describeResearchScope()
-    });
-
     // Проверяем количество чек-боксов на первой странице.
     let allCheckboxes = getCheckboxes();
     let totalFound = 0;
     console.log(`Найдено чек-боксов на текущей странице: ${allCheckboxes.length}`);
 
-    const pageSizeResult = await trySetPageSizeTo150();
-    const stableAfterPageSize = await waitForResearchGridStable(1600, 9000);
-    debugLog('research_pages:page_size_result', {
-        pageSizeResult,
-        stableAfterPageSize,
-        scope: describeResearchScope()
-    });
-    if (pageSizeResult.changed) {
-        console.log(`Количество записей автоматически переключено на ${TARGET_PAGE_SIZE}. Текущих чек-боксов: ${pageSizeResult.count}`);
+    if (orderReadyResult.pageSizeResult?.changed) {
+        console.log(`Количество записей автоматически переключено на ${TARGET_PAGE_SIZE}. Текущих чек-боксов: ${orderReadyResult.pageSizeResult.count}`);
         allCheckboxes = getCheckboxes();
-    } else if (pageSizeResult.reason === 'not_found') {
+    } else if (orderReadyResult.pageSizeResult?.reason === 'not_found') {
         console.warn('Не удалось автоматически найти переключатель количества записей. Продолжаю с постраничным обходом.');
     }
 
