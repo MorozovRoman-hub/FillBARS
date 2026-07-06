@@ -2524,43 +2524,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
-function sanitizeLogFilePart(value) {
-    return String(value || '')
-        .replace(/[\\/:*?"<>|]+/g, '_')
-        .replace(/\s+/g, '_')
-        .slice(0, 80) || 'unknown';
-}
-
-function downloadFillBarsLog(payload, profileName) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `fillbars-log-${timestamp}-${sanitizeLogFilePart(profileName)}.json`;
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-
-    if (chrome.downloads?.download) {
-        chrome.downloads.download({
-            url,
-            filename,
-            saveAs: false
-        }, () => {
-            URL.revokeObjectURL(url);
-            if (chrome.runtime.lastError) {
-                console.warn('[FillBARS] Не удалось скачать лог', chrome.runtime.lastError.message);
-            } else {
-                console.log(`[FillBARS] Лог сохранён: ${filename}`);
-            }
-        });
-        return filename;
-    }
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return filename;
-}
-
 // Обработчик кнопки "Заполнить форму"
 document.getElementById('fillForm').addEventListener('click', () => {
     const select = document.getElementById('profileSelect');
@@ -2607,34 +2570,9 @@ document.getElementById('fillForm').addEventListener('click', () => {
             args: [formData, selectedProfile, assignmentSettings]
         }, (results) => {
             const executeError = chrome.runtime.lastError?.message || null;
-            const logPayload = {
-                createdAt: new Date().toISOString(),
-                extensionVersion: '5.0',
-                profileName: selectedProfile,
-                targetTab: {
-                    id: tabs[0].id,
-                    title: tabs[0].title,
-                    url: tabs[0].url
-                },
-                assignmentSettings,
-                requestedAnalyses: {
-                    total: Object.keys(formData).length,
-                    selected: Object.values(formData).filter((value) => value === true).length,
-                    cleared: Object.values(formData).filter((value) => value === false).length,
-                    itemValues: Object.keys(formData)
-                },
-                chromeLastError: executeError,
-                frameResults: (results || []).map((entry) => ({
-                    frameId: entry?.frameId,
-                    documentId: entry?.documentId,
-                    result: entry?.result || null
-                }))
-            };
-
-            const savedLogName = downloadFillBarsLog(logPayload, selectedProfile);
 
             if (executeError) {
-                statusDiv.textContent = `❌ Ошибка: ${executeError}. Лог: ${savedLogName}`;
+                statusDiv.textContent = `❌ Ошибка: ${executeError}`;
                 statusDiv.style.color = '#f44336';
             } else if (results && results.length) {
                 const successfulResults = results
@@ -2644,16 +2582,16 @@ document.getElementById('fillForm').addEventListener('click', () => {
                     || successfulResults[0];
 
                 if (!result) {
-                    statusDiv.textContent = `❌ Не найдена карточка пациента или форма лаборатории БАРС. Лог: ${savedLogName}`;
+                    statusDiv.textContent = '❌ Не найдена карточка пациента или форма лаборатории БАРС';
                     statusDiv.style.color = '#f44336';
                     fillButton.disabled = false;
                     return;
                 }
 
-                statusDiv.textContent = `✅ ${result.message}. Лог: ${savedLogName}`;
+                statusDiv.textContent = `✅ ${result.message}`;
                 statusDiv.style.color = '#4CAF50';
             } else {
-                statusDiv.textContent = `✅ Заполнение выполнено. Лог: ${savedLogName}`;
+                statusDiv.textContent = '✅ Заполнение выполнено';
                 statusDiv.style.color = '#4CAF50';
             }
 
@@ -3135,37 +3073,6 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
 
     const ASSIGNMENT_CABINET_LABEL = normalizeText(targetCabinetName);
     const ASSIGNMENT_CABINET_TOKENS = ASSIGNMENT_CABINET_LABEL.split(' ').filter(Boolean);
-    const DEBUG_LOG_KEY = '__FillBARS_DEBUG_LOGS';
-    const DEBUG_LOG_NODE_ID = 'fillbars-debug-logs';
-    const DEBUG_LOG_STORAGE_KEY = 'FillBARS.debugLogs';
-
-    window[DEBUG_LOG_KEY] = [];
-
-    const publishDebugLogs = () => {
-        const logs = window[DEBUG_LOG_KEY] || [];
-        const payload = JSON.stringify(logs, null, 2);
-
-        try {
-            sessionStorage.setItem(DEBUG_LOG_STORAGE_KEY, payload);
-        } catch (error) {
-            // Storage can be blocked by the host page; the DOM holder below is the fallback.
-        }
-
-        try {
-            let holder = document.getElementById(DEBUG_LOG_NODE_ID);
-            if (!holder) {
-                holder = document.createElement('script');
-                holder.id = DEBUG_LOG_NODE_ID;
-                holder.type = 'application/json';
-                (document.body || document.documentElement).appendChild(holder);
-            }
-
-            holder.textContent = payload;
-        } catch (error) {
-            console.warn('[FillBARS] Не удалось опубликовать отладочный лог', error);
-        }
-    };
-
     const compactValue = (value) => {
         if (value === undefined || value === null) {
             return value;
@@ -3195,8 +3102,6 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             details: compactValue(details)
         };
 
-        window[DEBUG_LOG_KEY].push(entry);
-        publishDebugLogs();
         console.log(`[FillBARS] ${event}`, entry.details);
         return entry;
     };
@@ -3215,7 +3120,6 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         requestedCleared: Object.values(formData).filter((value) => value === false).length,
         requestedItemValues: getRequestedItemValues()
     });
-    console.log('FillBARS debug: copy(document.getElementById("fillbars-debug-logs")?.textContent || sessionStorage.getItem("FillBARS.debugLogs") || "нет логов")');
 
     const getVisibleElements = (selector, root = document) => {
         return Array.from(root.querySelectorAll(selector)).filter(isVisible);
@@ -4736,8 +4640,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                 skipped: true,
                 message: 'Нет контекста пациента БАРС в этом фрейме',
                 filledCount: 0,
-                totalFound: 0,
-                debugLogs: window[DEBUG_LOG_KEY] || []
+                totalFound: 0
             };
         }
 
@@ -4745,8 +4648,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return {
             message: `Форма заказа исследований не готова (${orderReadyResult.reason})`,
             filledCount: 0,
-            totalFound: 0,
-            debugLogs: window[DEBUG_LOG_KEY] || []
+            totalFound: 0
         };
     }
 
@@ -4960,7 +4862,6 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         totalFound,
         pagesProcessed: processedPages.size,
         missingCount: remainingItemValues.size,
-        missingItemValues: Array.from(remainingItemValues),
-        debugLogs: window[DEBUG_LOG_KEY] || []
+        missingItemValues: Array.from(remainingItemValues)
     };
 }
