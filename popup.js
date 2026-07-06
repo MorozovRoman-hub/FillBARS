@@ -2971,30 +2971,50 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     };
 
     const openAllResearches = async () => {
-        const orderRoot = getResearchOrderRoot() || document;
-        const candidates = Array.from(orderRoot.querySelectorAll('button, a, span, div, td, input[type="button"], input[type="submit"]'))
-            .filter((element) => {
-                const label = getElementLabel(element);
+        const findAllResearchesTarget = () => {
+            const orderRoot = getResearchOrderRoot() || document;
+            return Array.from(orderRoot.querySelectorAll('button, a, span, div, td, input[type="button"], input[type="submit"]'))
+                .filter((element) => {
+                    const label = getElementLabel(element);
 
-                return isVisible(element)
-                    && label.includes('все исследования')
-                    && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0;
-            })
-            .sort((left, right) => {
-                const leftLabel = getElementLabel(left);
-                const rightLabel = getElementLabel(right);
-                const leftExact = leftLabel === 'все исследования' ? 10000 : 0;
-                const rightExact = rightLabel === 'все исследования' ? 10000 : 0;
-                const leftTag = /^(BUTTON|A|INPUT)$/i.test(left.tagName) ? 1000 : 0;
-                const rightTag = /^(BUTTON|A|INPUT)$/i.test(right.tagName) ? 1000 : 0;
+                    return isVisible(element)
+                        && label.includes('все исследования')
+                        && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0;
+                })
+                .sort((left, right) => {
+                    const leftLabel = getElementLabel(left);
+                    const rightLabel = getElementLabel(right);
+                    const leftExact = leftLabel === 'все исследования' ? 10000 : 0;
+                    const rightExact = rightLabel === 'все исследования' ? 10000 : 0;
+                    const leftTag = /^(BUTTON|A|INPUT)$/i.test(left.tagName) ? 1000 : 0;
+                    const rightTag = /^(BUTTON|A|INPUT)$/i.test(right.tagName) ? 1000 : 0;
 
-                return (rightExact + rightTag - rightLabel.length) - (leftExact + leftTag - leftLabel.length);
-            });
+                    return (rightExact + rightTag - rightLabel.length) - (leftExact + leftTag - leftLabel.length);
+                })[0] || null;
+        };
 
-        const target = candidates[0];
+        const target = await waitForCondition(() => {
+            const allResearchesTarget = findAllResearchesTarget();
+
+            if (allResearchesTarget) {
+                return allResearchesTarget;
+            }
+
+            if (getCheckboxes().length > 0) {
+                return { alreadyLoaded: true };
+            }
+
+            return null;
+        }, 15000, 300);
+
         if (!target) {
             console.warn('Кнопка "Все исследования" не найдена. Продолжаю с текущим списком.');
             return { clicked: false, count: getCheckboxes().length };
+        }
+
+        if (target.alreadyLoaded) {
+            const count = await waitForCheckboxesToSettle();
+            return { clicked: false, reason: 'already_loaded', count };
         }
 
         clickElement(target, false);
@@ -3529,9 +3549,23 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             .at(-1) || null;
     };
 
+    const getResearchWindowScore = (element) => {
+        const root = getWindowRoot(element);
+        return (root?.classList?.contains('showed') ? 10000 : 0)
+            - (root?.classList?.contains('hidden') ? 10000 : 0)
+            + getZIndex(root || element);
+    };
+
     const getResearchOrderRoot = () => {
         const directForm = getVisibleElements('.dirline_order_alt')
-            .sort((left, right) => sortByWindowStack(getWindowRoot(left), getWindowRoot(right)))
+            .sort((left, right) => {
+                const scoreDiff = getResearchWindowScore(left) - getResearchWindowScore(right);
+                if (scoreDiff !== 0) {
+                    return scoreDiff;
+                }
+
+                return sortByWindowStack(getWindowRoot(left), getWindowRoot(right));
+            })
             .at(-1);
 
         if (directForm) {
@@ -3539,7 +3573,14 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         }
 
         const grid = getVisibleElements('[name="GridResearch"]')
-            .sort((left, right) => sortByWindowStack(getWindowRoot(left), getWindowRoot(right)))
+            .sort((left, right) => {
+                const scoreDiff = getResearchWindowScore(left) - getResearchWindowScore(right);
+                if (scoreDiff !== 0) {
+                    return scoreDiff;
+                }
+
+                return sortByWindowStack(getWindowRoot(left), getWindowRoot(right));
+            })
             .at(-1);
 
         return grid ? getWindowRoot(grid) : document;
