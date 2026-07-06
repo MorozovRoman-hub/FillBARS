@@ -2628,7 +2628,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR))
+    const getCheckboxes = () => Array.from(getResearchGridRoot().querySelectorAll(CHECKBOX_SELECTOR))
         .filter((checkbox) => checkbox.getAttribute('item_value'));
 
     const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -2781,8 +2781,8 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             && rect.top >= rootRect.top - 20
             && rect.bottom <= rootRect.bottom + 80;
 
-        const rootHeight = Math.max(rootRect.height, window.innerHeight);
-        const rootWidth = Math.max(rootRect.width, window.innerWidth);
+        const rootHeight = root === document.body ? Math.max(rootRect.height, window.innerHeight) : rootRect.height;
+        const rootWidth = root === document.body ? Math.max(rootRect.width, window.innerWidth) : rootRect.width;
         const inBottomPart = rect.top >= rootRect.top + rootHeight * 0.35 || rect.bottom >= window.innerHeight * 0.5;
         const inRightPart = rect.left >= rootRect.left + rootWidth * 0.3;
 
@@ -2884,7 +2884,8 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     };
 
     const openAllResearches = async () => {
-        const candidates = Array.from(document.querySelectorAll('button, a, span, div, td, input[type="button"], input[type="submit"]'))
+        const orderRoot = getResearchOrderRoot() || document;
+        const candidates = Array.from(orderRoot.querySelectorAll('button, a, span, div, td, input[type="button"], input[type="submit"]'))
             .filter((element) => {
                 const label = getElementLabel(element);
 
@@ -2923,7 +2924,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             return { changed: false, reason: 'already_full', count: currentCount };
         }
 
-        const root = document.body;
+        const root = getResearchGridRoot();
         const pageSizes = new Set(['5', '10', '15', '20', '25', '30', '50', '100']);
         const currentCountText = String(currentCount);
         const editableSelector = 'input[type="number"], input[type="text"], input:not([type]), textarea, [contenteditable="true"]';
@@ -2984,7 +2985,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             });
 
         for (const element of clickableElements) {
-            const knownVisibleEditors = new Set(Array.from(document.querySelectorAll(editableSelector)).filter(isVisible));
+            const knownVisibleEditors = new Set(Array.from(root.querySelectorAll(editableSelector)).filter(isVisible));
             clickElement(element);
             await sleep(200);
 
@@ -2992,7 +2993,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             if (active && /^(INPUT|TEXTAREA)$/i.test(active.tagName) && isPotentialPageSizeInput(active, true)) {
                 await setInputValue(active, TARGET_PAGE_SIZE);
             } else {
-                const editor = Array.from(document.querySelectorAll(editableSelector))
+                const editor = Array.from(root.querySelectorAll(editableSelector))
                     .filter((candidate) => isPotentialPageSizeInput(candidate, true))
                     .find((candidate) => !knownVisibleEditors.has(candidate));
 
@@ -3134,9 +3135,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return !!readBarsVar('PERSMEDCARD', true);
     };
 
-    const isResearchOrderFormOpen = () => {
-        return !!document.querySelector('.dirline_order_alt, [name="GridResearch"]');
-    };
+    const isResearchOrderFormOpen = () => !!getVisibleElements('.dirline_order_alt, [name="GridResearch"]').length;
 
     const getSameOriginContexts = () => {
         return [window, window.parent, getTopWindow()]
@@ -3363,8 +3362,8 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     };
 
     const getCurrentResearchPageInfo = () => {
-        const grid = document.querySelector('[name="GridResearch"]');
-        const rangeText = normalizeText((grid || document).querySelector('[name="rangeResearch"], .ctrl_range')?.innerText || '');
+        const grid = getResearchGridRoot();
+        const rangeText = normalizeText(grid.querySelector('[name="rangeResearch"], .ctrl_range')?.innerText || '');
         const match = rangeText.match(/стр\.\s*(\d+)\s*из\s*(\d+)/i);
 
         return {
@@ -3380,7 +3379,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             return false;
         }
 
-        const grid = document.querySelector('[name="GridResearch"]') || document;
+        const grid = getResearchGridRoot();
         const nextButton = Array.from(grid.querySelectorAll('.ctrl_range_go_next, [onclick*="RangeCtrl.go"]'))
             .filter((element) => isVisible(element) && String(element.getAttribute('onclick') || '').includes(',1'))
             .sort((left, right) => right.getBoundingClientRect().left - left.getBoundingClientRect().left)[0];
@@ -3433,6 +3432,28 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             .filter(predicate)
             .sort(sortByWindowStack)
             .at(-1) || null;
+    };
+
+    const getResearchOrderRoot = () => {
+        const directForm = getVisibleElements('.dirline_order_alt')
+            .sort((left, right) => sortByWindowStack(getWindowRoot(left), getWindowRoot(right)))
+            .at(-1);
+
+        if (directForm) {
+            return getWindowRoot(directForm);
+        }
+
+        const grid = getVisibleElements('[name="GridResearch"]')
+            .sort((left, right) => sortByWindowStack(getWindowRoot(left), getWindowRoot(right)))
+            .at(-1);
+
+        return grid ? getWindowRoot(grid) : document;
+    };
+
+    const getResearchGridRoot = () => {
+        const orderRoot = getResearchOrderRoot();
+        const grid = orderRoot?.querySelector('[name="GridResearch"]');
+        return grid || orderRoot || document;
     };
 
     const findScheduleForm = () => {
