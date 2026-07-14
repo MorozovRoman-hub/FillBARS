@@ -2524,6 +2524,96 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
+function inspectBarsFrame() {
+    const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const isVisible = (element) => {
+        if (!element || !element.isConnected) {
+            return false;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0
+            && rect.height > 0
+            && style.display !== 'none'
+            && style.visibility !== 'hidden';
+    };
+    const getVisibleElements = (selector) => Array.from(document.querySelectorAll(selector)).filter(isVisible);
+    const contexts = [window];
+
+    try {
+        contexts.push(window.parent, window.top);
+    } catch (error) {
+        // A cross-origin parent cannot contribute to the BARS context.
+    }
+
+    const hasPatientContext = contexts
+        .filter((context, index, list) => context && list.indexOf(context) === index)
+        .some((context) => {
+            try {
+                if (typeof context.getVar !== 'function') {
+                    return false;
+                }
+
+                return [context.getVar('PERSMEDCARD', 1), context.getVar('PERSMEDCARD')]
+                    .some((value) => value !== undefined && value !== null && String(value).trim() !== '');
+            } catch (error) {
+                return false;
+            }
+        });
+    const researchGrids = getVisibleElements('[name="GridResearch"]');
+    const checkboxCount = researchGrids.reduce((count, grid) => count
+        + grid.querySelectorAll('input[name="GridResearch_SelectList_Item"][item_value]').length, 0);
+    const hasOrderForm = getVisibleElements('.dirline_order_alt').length > 0;
+    const hasOpenLabButton = getVisibleElements('button, input[type="button"], input[type="submit"], a, span, div')
+        .some((element) => {
+            const name = normalizeText(element.getAttribute('name'));
+            const label = normalizeText([element.textContent, element.value, element.title].filter(Boolean).join(' '));
+            return name === 'btnopenlabmedanalizenew1'
+                || name === 'btnopenlabmedanalizenew'
+                || label.includes('направление на исследование')
+                || label.includes('направление на анализ');
+        });
+    const hasLabHistoryLink = getVisibleElements('span, a, td, div')
+        .some((element) => normalizeText(element.textContent).includes('лабораторные исследования')
+            && normalizeText(element.getAttribute('onclick')).includes('openonlinkwindow'));
+    const hasBarsApi = contexts.some((context) => {
+        try {
+            return typeof context?.openD3Form === 'function' || typeof context?.openWindow === 'function';
+        } catch (error) {
+            return false;
+        }
+    });
+    const score = (hasOrderForm ? 10000 : 0)
+        + (researchGrids.length > 0 ? 6000 : 0)
+        + Math.min(checkboxCount, 500)
+        + (hasPatientContext && hasOpenLabButton ? 2000 : 0)
+        + (hasPatientContext && hasLabHistoryLink ? 1200 : 0)
+        + (hasPatientContext && hasBarsApi ? 500 : 0);
+
+    return {
+        score,
+        hasOrderForm,
+        researchGridCount: researchGrids.length,
+        checkboxCount,
+        hasPatientContext,
+        hasOpenLabButton,
+        hasLabHistoryLink,
+        hasBarsApi
+    };
+}
+
+function selectBarsFrame(results) {
+    return (results || [])
+        .map((entry) => ({ frameId: entry.frameId, ...entry.result }))
+        // A ready laboratory form can be safely bound to one frame. Opening a new
+        // form is kept in compatibility mode because BARS may render it elsewhere.
+        .filter((frame) => Number.isInteger(frame.frameId)
+            && frame.score > 0
+            && (frame.hasOrderForm || frame.researchGridCount > 0))
+        .sort((left, right) => right.score - left.score || right.checkboxCount - left.checkboxCount)[0] || null;
+}
+
 // Обработчик кнопки "Заполнить форму"
 document.getElementById('fillForm').addEventListener('click', () => {
     const select = document.getElementById('profileSelect');
@@ -2566,9 +2656,28 @@ document.getElementById('fillForm').addEventListener('click', () => {
         chrome.scripting.executeScript({
             target: { tabId: tabs[0].id, allFrames: true },
             world: 'MAIN',
-            func: fillForm,
-            args: [formData, selectedProfile, assignmentSettings]
-        }, (results) => {
+            func: inspectBarsFrame
+        }, (probeResults) => {
+            const probeError = chrome.runtime.lastError?.message || null;
+            const targetFrame = probeError ? null : selectBarsFrame(probeResults);
+
+            if (probeError) {
+                console.warn('[FillBARS] Не удалось определить фрейм БАРС, использую совместимый режим.', probeError);
+            } else {
+                console.log('[FillBARS] Диагностика фреймов БАРС', (probeResults || []).map((entry) => ({
+                    frameId: entry.frameId,
+                    ...entry.result
+                })));
+            }
+
+            chrome.scripting.executeScript({
+                target: targetFrame
+                    ? { tabId: tabs[0].id, frameIds: [targetFrame.frameId] }
+                    : { tabId: tabs[0].id, allFrames: true },
+                world: 'MAIN',
+                func: fillForm,
+                args: [formData, selectedProfile, assignmentSettings]
+            }, (results) => {
             const executeError = chrome.runtime.lastError?.message || null;
 
             if (executeError) {
@@ -2588,7 +2697,10 @@ document.getElementById('fillForm').addEventListener('click', () => {
                     return;
                 }
 
-                statusDiv.textContent = `✅ ${result.message}`;
+                const paginationStatus = result.pagination?.usedBarsRangeControl
+                    ? ' Штатная пагинация БАРС: 150 записей.'
+                    : '';
+                statusDiv.textContent = `✅ ${result.message}${paginationStatus}`;
                 statusDiv.style.color = '#4CAF50';
             } else {
                 statusDiv.textContent = '✅ Заполнение выполнено';
@@ -2596,6 +2708,7 @@ document.getElementById('fillForm').addEventListener('click', () => {
             }
 
             fillButton.disabled = false;
+            });
         });
     });
 });
@@ -2612,7 +2725,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     console.log("╔════════════════════════════════════════════════════════════╗");
     console.log("║  МИС БАРС - Автоматическое назначение анализов           ║");
     console.log("║  Разработчик: MorozovRV and Bitucckii VA                 ║");
-    console.log("║  Версия: 5.0                                              ║");
+    console.log("║  Версия: 5.1                                              ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
     
@@ -2630,8 +2743,14 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    let researchCheckboxIndex = new Map();
+
     const getCheckboxes = () => Array.from(getResearchGridRoot().querySelectorAll(CHECKBOX_SELECTOR))
         .filter((checkbox) => checkbox.getAttribute('item_value'));
+
+    const indexResearchCheckboxes = (checkboxes) => {
+        researchCheckboxIndex = new Map(checkboxes.map((checkbox) => [checkbox.getAttribute('item_value'), checkbox]));
+    };
 
     const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
@@ -2684,7 +2803,26 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     };
 
     const findCheckboxByItemValue = (itemValue) => {
-        return getCheckboxes().find((checkbox) => checkbox.getAttribute('item_value') === itemValue);
+        const researchGrid = getResearchGridRoot();
+        const cachedCheckbox = researchCheckboxIndex.get(itemValue);
+
+        if (cachedCheckbox
+            && cachedCheckbox.isConnected
+            && researchGrid.contains(cachedCheckbox)
+            && cachedCheckbox.getAttribute('item_value') === itemValue) {
+            return cachedCheckbox;
+        }
+
+        const checkbox = Array.from(researchGrid.querySelectorAll(CHECKBOX_SELECTOR))
+            .find((element) => element.getAttribute('item_value') === itemValue) || null;
+
+        if (checkbox) {
+            researchCheckboxIndex.set(itemValue, checkbox);
+        } else {
+            researchCheckboxIndex.delete(itemValue);
+        }
+
+        return checkbox;
     };
 
     const clickCheckboxLikeUser = (checkbox) => {
@@ -2700,38 +2838,98 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         checkbox.click();
     };
 
-    const waitForBarsToProcessSelection = async (itemValue, desiredState) => {
-        const startedAt = Date.now();
-
-        while (Date.now() - startedAt < 3000) {
-            await sleep(180);
-
+    const waitForBarsToProcessSelection = (itemValue, desiredState) => {
+        const getSelectionState = () => {
             const checkbox = findCheckboxByItemValue(itemValue);
             const selectedValues = getSelectedOrderItemValues();
             const checkboxMatches = !!checkbox && checkbox.checked === desiredState;
+            const selectedListMatches = selectedValues.sourceCount === 0
+                || selectedValues.values.has(itemValue) === desiredState;
 
-            if (checkboxMatches && selectedValues.sourceCount === 0) {
-                await sleep(350);
-                const refreshedCheckbox = findCheckboxByItemValue(itemValue);
-                if (refreshedCheckbox?.checked === desiredState) {
-                    return true;
+            return {
+                isReady: checkboxMatches && selectedListMatches,
+                needsStabilityCheck: checkboxMatches && selectedValues.sourceCount === 0
+            };
+        };
+
+        return new Promise((resolve) => {
+            let observer = null;
+            let pollTimer = null;
+            let timeoutTimer = null;
+            let stabilityTimer = null;
+            let isFinished = false;
+            let isVerificationScheduled = false;
+
+            const cleanup = () => {
+                observer?.disconnect();
+                clearInterval(pollTimer);
+                clearTimeout(timeoutTimer);
+                clearTimeout(stabilityTimer);
+            };
+            const finish = (result) => {
+                if (isFinished) {
+                    return;
                 }
-                continue;
+
+                isFinished = true;
+                cleanup();
+                resolve(result);
+            };
+            const verify = () => {
+                if (isFinished) {
+                    return;
+                }
+
+                const state = getSelectionState();
+                if (!state.isReady) {
+                    clearTimeout(stabilityTimer);
+                    stabilityTimer = null;
+                    return;
+                }
+
+                if (!state.needsStabilityCheck) {
+                    finish(true);
+                    return;
+                }
+
+                if (stabilityTimer === null) {
+                    stabilityTimer = setTimeout(() => {
+                        stabilityTimer = null;
+                        const stableState = getSelectionState();
+                        if (stableState.isReady) {
+                            finish(true);
+                        } else {
+                            verify();
+                        }
+                    }, 350);
+                }
+            };
+            const scheduleVerification = () => {
+                if (isVerificationScheduled || isFinished) {
+                    return;
+                }
+
+                isVerificationScheduled = true;
+                Promise.resolve().then(() => {
+                    isVerificationScheduled = false;
+                    verify();
+                });
+            };
+
+            if (typeof MutationObserver === 'function' && document.body) {
+                observer = new MutationObserver(scheduleVerification);
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['checked', 'item_value', 'class']
+                });
             }
 
-            const selectedListMatches = selectedValues.values.has(itemValue) === desiredState;
-
-            if (checkboxMatches && selectedListMatches) {
-                return true;
-            }
-        }
-
-        await sleep(350);
-        const checkbox = findCheckboxByItemValue(itemValue);
-        const selectedValues = getSelectedOrderItemValues();
-        return !!checkbox
-            && checkbox.checked === desiredState
-            && (selectedValues.sourceCount === 0 || selectedValues.values.has(itemValue) === desiredState);
+            pollTimer = setInterval(verify, 180);
+            timeoutTimer = setTimeout(() => finish(getSelectionState().isReady), 3000);
+            verify();
+        });
     };
 
     const setCheckboxStateThroughBars = async (itemValue, desiredState) => {
@@ -2762,6 +2960,12 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         if (!checkbox) {
             console.warn(`Анализ не найден на странице: ${itemValue}`);
             return false;
+        }
+
+        // A selected item is often already synchronized after reopening the form.
+        // Keep that state instead of forcing an unnecessary clear-and-select cycle.
+        if (checkbox.checked && await waitForBarsToProcessSelection(itemValue, true)) {
+            return true;
         }
 
         if (checkbox.checked) {
@@ -2974,11 +3178,43 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     const trySetPageSizeTo150 = async () => {
         const currentCount = getCheckboxes().length;
 
-        if (currentCount >= 100) {
+        if (currentCount >= TARGET_PAGE_SIZE) {
             return { changed: false, reason: 'already_full', count: currentCount };
         }
 
         const root = getResearchGridRoot();
+        const rangeControl = root.querySelector('[cmptype="Range"]');
+        const rangeCountCombo = rangeControl?.CountViewCombo
+            || rangeControl?.querySelector('[cmptype="ComboBox"]');
+
+        if (rangeControl
+            && rangeCountCombo
+            && typeof window.RangeCountRefresh === 'function') {
+            const currentRangeCount = Number.parseInt(rangeControl.getAttribute('valuecount'), 10);
+
+            if (currentRangeCount !== TARGET_PAGE_SIZE) {
+                try {
+                    if (typeof window.ComboBox_SetValue === 'function') {
+                        window.ComboBox_SetValue(rangeCountCombo, TARGET_PAGE_SIZE);
+                    }
+                    window.RangeCountRefresh(rangeCountCombo, TARGET_PAGE_SIZE);
+
+                    const isApplied = await waitForCondition(
+                        () => Number.parseInt(rangeControl.getAttribute('valuecount'), 10) === TARGET_PAGE_SIZE,
+                        1200,
+                        100
+                    );
+                    const count = isApplied ? await waitForCheckboxesToSettle() : getCheckboxes().length;
+                    if (isApplied) {
+                        console.log(`[FillBARS] Пагинация: штатный Range БАРС применён (${count} записей на странице).`);
+                    }
+                    return { changed: !!isApplied, reason: 'bars_range', count };
+                } catch (error) {
+                    console.warn('[FillBARS] Не удалось изменить размер страницы через Range БАРС', error);
+                }
+            }
+        }
+
         const pageSizes = new Set(['5', '10', '15', '20', '25', '30', '50', '100']);
         const currentCountText = String(currentCount);
         const editableSelector = 'input[type="number"], input[type="text"], input:not([type]), textarea, [contenteditable="true"]';
@@ -2993,6 +3229,17 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                 && isPagerArea(input, root)
                 && (pageSizes.has(value) || hasPageSizeMarker || (allowEmpty && value === ''));
         };
+        const describePaginationControl = (element) => ({
+            tag: element?.tagName || '',
+            id: element?.id || '',
+            name: element?.getAttribute('name') || '',
+            cmptype: element?.getAttribute('cmptype') || '',
+            className: String(element?.className || ''),
+            title: element?.getAttribute('title') || '',
+            onclick: element?.getAttribute('onclick') || '',
+            type: element?.getAttribute('type') || '',
+            value: 'value' in (element || {}) ? String(element.value || '') : ''
+        });
 
         const selects = Array.from(root.querySelectorAll('select'))
             .filter((select) => isVisible(select) && !select.disabled && isPagerArea(select, root));
@@ -3014,6 +3261,40 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             if (count > currentCount) {
                 return { changed: true, reason: 'input', count };
             }
+        }
+
+        const rangeCountTriggers = Array.from(root.querySelectorAll('span[title]'))
+            .filter((element) => isVisible(element)
+                && isPagerArea(element, root)
+                && normalizeText(element.getAttribute('title')) === 'записей');
+
+        for (const trigger of rangeCountTriggers) {
+            const knownVisibleEditors = new Set(Array.from(root.querySelectorAll(editableSelector)).filter(isVisible));
+            clickElement(trigger);
+            await sleep(200);
+
+            const active = document.activeElement;
+            const editor = active && /^(INPUT|TEXTAREA)$/i.test(active.tagName)
+                && isPotentialPageSizeInput(active, true)
+                ? active
+                : Array.from(root.querySelectorAll(editableSelector))
+                    .filter((candidate) => isPotentialPageSizeInput(candidate, true))
+                    .find((candidate) => !knownVisibleEditors.has(candidate));
+
+            if (!editor) {
+                console.log(`[FillBARS] Пагинация Range: редактор не найден ${JSON.stringify(describePaginationControl(trigger))}`);
+                continue;
+            }
+
+            if (/^(INPUT|TEXTAREA)$/i.test(editor.tagName)) {
+                await setInputValue(editor, TARGET_PAGE_SIZE);
+            } else {
+                await setEditableText(editor, TARGET_PAGE_SIZE);
+            }
+
+            const count = await waitForCheckboxesToSettle();
+            console.log(`[FillBARS] Пагинация: штатный контрол Range БАРС применён (${count} записей на странице).`);
+            return { changed: true, reason: 'bars_range_editor', count };
         }
 
         const clickableElements = Array.from(root.querySelectorAll('button, span, div, a, td'))
@@ -3044,14 +3325,20 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             await sleep(200);
 
             const active = document.activeElement;
+            let editor = null;
             if (active && /^(INPUT|TEXTAREA)$/i.test(active.tagName) && isPotentialPageSizeInput(active, true)) {
+                editor = active;
                 await setInputValue(active, TARGET_PAGE_SIZE);
             } else {
-                const editor = Array.from(root.querySelectorAll(editableSelector))
+                editor = Array.from(root.querySelectorAll(editableSelector))
                     .filter((candidate) => isPotentialPageSizeInput(candidate, true))
                     .find((candidate) => !knownVisibleEditors.has(candidate));
 
                 if (!editor) {
+                    console.log(`[FillBARS] Пагинация fallback clickable: ${JSON.stringify({
+                        trigger: describePaginationControl(element),
+                        editor: null
+                    })}`);
                     continue;
                 }
 
@@ -3061,6 +3348,11 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
                     await setEditableText(editor, TARGET_PAGE_SIZE);
                 }
             }
+
+            console.log(`[FillBARS] Пагинация fallback clickable: ${JSON.stringify({
+                trigger: describePaginationControl(element),
+                editor: describePaginationControl(editor)
+            })}`);
 
             const count = await waitForRowsReload(currentCount);
             if (count > currentCount) {
@@ -3537,7 +3829,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return getCheckboxes().length;
     };
 
-    const getSelectedOrderItemValues = () => {
+    const getSelectedOrderItemValues = (includeDiagnostics = false) => {
         const orderRoot = getResearchOrderRoot();
         const researchGrid = getResearchGridRoot();
         const allOutsideResearchGrid = Array.from((orderRoot || document).querySelectorAll('[item_value]'))
@@ -3552,12 +3844,16 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         return {
             values: new Set(candidates.map((element) => element.getAttribute('item_value'))),
             sourceCount: candidates.length,
-            sources: candidates.slice(0, 50).map((element) => describeElement(element)),
-            diagnosticOutsideItemValueCount: allOutsideResearchGrid.length,
-            diagnosticOutsideItemValues: allOutsideResearchGrid.slice(0, 50).map((element) => ({
-                itemValue: element.getAttribute('item_value'),
-                element: describeElement(element)
-            }))
+            sources: includeDiagnostics
+                ? candidates.slice(0, 50).map((element) => describeElement(element))
+                : [],
+            diagnosticOutsideItemValueCount: includeDiagnostics ? allOutsideResearchGrid.length : 0,
+            diagnosticOutsideItemValues: includeDiagnostics
+                ? allOutsideResearchGrid.slice(0, 50).map((element) => ({
+                    itemValue: element.getAttribute('item_value'),
+                    element: describeElement(element)
+                }))
+                : []
         };
     };
 
@@ -3565,7 +3861,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         const orderRoot = getResearchOrderRoot();
         const gridRoot = getResearchGridRoot();
         const visibleGrids = getVisibleElements('[name="GridResearch"]').map((grid) => describeElement(grid));
-        const selectedValues = getSelectedOrderItemValues();
+        const selectedValues = getSelectedOrderItemValues(true);
         return {
             orderRoot: describeElement(orderRoot === document ? document.body : orderRoot),
             gridRoot: describeElement(gridRoot === document ? document.body : gridRoot),
@@ -4521,7 +4817,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             }))
         });
 
-        for (const checkbox of urgentCheckboxes) {
+        for (const [index, checkbox] of urgentCheckboxes.entries()) {
             if (!checkbox.isConnected || !isVisible(checkbox)) {
                 debugLog('urgent:skip_not_visible', { checkbox: describeElement(checkbox) });
                 continue;
@@ -4530,10 +4826,25 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
             if (!checkbox.checked) {
                 debugLog('urgent:click', { checkbox: describeElement(checkbox) });
                 clickCheckboxLikeUser(checkbox);
-                await waitForBarsToProcessSelection();
+                const isApplied = await waitForCondition(() => {
+                    const currentScheduleForm = findScheduleForm();
+                    const currentCheckbox = currentScheduleForm
+                        ? findUrgentCheckboxesInSchedule(currentScheduleForm)[index]
+                        : null;
+                    return currentCheckbox?.checked === true;
+                }, 3000, 120);
+
+                if (!isApplied) {
+                    debugLog('urgent:not_applied', { index });
+                    continue;
+                }
             }
 
-            if (checkbox.checked) {
+            const currentScheduleForm = findScheduleForm();
+            const currentCheckbox = currentScheduleForm
+                ? findUrgentCheckboxesInSchedule(currentScheduleForm)[index]
+                : null;
+            if (currentCheckbox?.checked) {
                 selected++;
             }
         }
@@ -4670,6 +4981,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
 
     while (true) {
         allCheckboxes = getCheckboxes();
+        indexResearchCheckboxes(allCheckboxes);
         totalFound += allCheckboxes.length;
 
         const pageInfo = getCurrentResearchPageInfo();
@@ -4812,6 +5124,16 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
     }
     
     const message = `Профиль "${profileName}": обработано ${filledCount} анализов (просмотрено страниц: ${processedPages.size})${scheduleMessage ? `. ${scheduleMessage}` : ''}`;
+    const pagination = {
+        method: orderReadyResult.pageSizeResult?.reason || 'not_used',
+        usedBarsRangeControl: ['bars_range', 'bars_range_editor'].includes(orderReadyResult.pageSizeResult?.reason)
+            && orderReadyResult.pageSizeResult?.changed === true
+    };
+    console.log(
+        pagination.usedBarsRangeControl
+            ? `[FillBARS] Пагинация: штатный Range БАРС (${orderReadyResult.pageSizeResult.count} записей).`
+            : `[FillBARS] Пагинация: fallback ${pagination.method} (${orderReadyResult.pageSizeResult?.count ?? totalFound} записей).`
+    );
     debugLog('fill:complete', {
         message,
         filledCount,
@@ -4819,6 +5141,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         pagesProcessed: processedPages.size,
         missingCount: remainingItemValues.size,
         missingItemValues: Array.from(remainingItemValues),
+        pagination,
         finalScope: describeResearchScope(),
         finalOrderGridSnapshots: describeOrderGridSnapshots()
     });
@@ -4862,6 +5185,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}) {
         totalFound,
         pagesProcessed: processedPages.size,
         missingCount: remainingItemValues.size,
-        missingItemValues: Array.from(remainingItemValues)
+        missingItemValues: Array.from(remainingItemValues),
+        pagination
     };
 }
