@@ -1,12 +1,13 @@
 (function initializeFillBARSAdapter(globalScope) {
     'use strict';
 
-    const VERSION = '5.1.10';
+    const VERSION = '5.1.11';
     const ORDER_FORM_SELECTOR = '.dirline_order_alt';
     const GRID_GROUPS_SELECTOR = '[name="GridGroups"]';
     const GRID_RESEARCH_SELECTOR = '[name="GridResearch"]';
     const GRID_DIRLINE_SELECTOR = '[name="GridDirline"]';
     const RESEARCH_CHECKBOX_SELECTOR = 'input[name="GridResearch_SelectList_Item"]';
+    const CITO_CONTROL_SELECTOR = '[name="Cito"]';
     const SCHEDULE_FORM_SELECTOR = '.form-schedule';
     const SCHEDULE_GRID_SELECTOR = '[name="GridServices"]';
     const SCHEDULE_REPEATER_NAME = 'GridServices_repeater';
@@ -486,6 +487,163 @@
                 available: authoritative,
                 authoritative,
                 structuralRowCount: structuralRows.length
+            };
+        };
+
+        const normalizeCitoValue = (value) => {
+            if (value === true || value === 1) {
+                return true;
+            }
+            if (value === false || value === 0 || value === null || value === undefined) {
+                return false;
+            }
+
+            return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+        };
+
+        const getCitoInteractionTarget = (control) => {
+            if (!control) {
+                return null;
+            }
+            if (control.matches?.('input[type="checkbox"]')) {
+                return control;
+            }
+            return control.querySelector?.('input[type="checkbox"]') || control;
+        };
+
+        const readCitoControlValue = (control) => {
+            if (!control) {
+                return { available: false, checked: false, method: 'missing_control' };
+            }
+
+            try {
+                if (typeof windowRef.D3Api?.CheckBoxCtrl?.getValue === 'function') {
+                    const value = runInFormContext(
+                        control,
+                        () => windowRef.D3Api.CheckBoxCtrl.getValue(control)
+                    );
+                    return {
+                        available: true,
+                        checked: normalizeCitoValue(value),
+                        method: 'd3_checkbox'
+                    };
+                }
+            } catch (error) {
+                // The native input state remains the source-driven fallback.
+            }
+
+            const target = getCitoInteractionTarget(control);
+            if (target && 'checked' in target) {
+                return {
+                    available: true,
+                    checked: target.checked === true,
+                    method: 'native_checkbox'
+                };
+            }
+
+            return { available: false, checked: false, method: 'unsupported_control' };
+        };
+
+        const getDirlineCitoEntries = (form = findOrderForm()) => {
+            const selectedState = getSelectedResearchState(form);
+            const entries = [];
+
+            for (const row of selectedState.sources) {
+                const itemValue = [
+                    row.getAttribute?.('rs_id_keyvalue'),
+                    row.clone?.data?.RS_ID,
+                    row._node?.data?.RS_ID
+                ].map(normalizeResearchId).find(Boolean) || '';
+                if (!itemValue) {
+                    continue;
+                }
+
+                const control = row.querySelector?.(CITO_CONTROL_SELECTOR) || null;
+                const state = readCitoControlValue(control);
+                entries.push({
+                    itemValue,
+                    row,
+                    control,
+                    available: state.available,
+                    checked: state.checked,
+                    method: state.method
+                });
+            }
+
+            return entries;
+        };
+
+        const requestDirlineCito = (itemValue, desiredState = true, form = findOrderForm()) => {
+            const normalizedItemValue = normalizeResearchId(itemValue);
+            const desired = desiredState === true;
+            const beforeEntries = getDirlineCitoEntries(form)
+                .filter((entry) => entry.itemValue === normalizedItemValue);
+            const changedMethods = [];
+            let disabledCount = 0;
+
+            for (const entry of beforeEntries) {
+                if (!entry.available || !entry.control || entry.checked === desired) {
+                    continue;
+                }
+
+                const target = getCitoInteractionTarget(entry.control);
+                if (!target || target.disabled === true || entry.control.getAttribute?.('disabled') !== null) {
+                    disabledCount += 1;
+                    continue;
+                }
+
+                try {
+                    runInFormContext(entry.row, () => target.click());
+                    changedMethods.push('native_click');
+                } catch (error) {
+                    changedMethods.push('native_click_failed');
+                }
+
+                const afterClick = readCitoControlValue(entry.control);
+                if (afterClick.available && afterClick.checked === desired) {
+                    continue;
+                }
+
+                try {
+                    if (typeof windowRef.D3Api?.CheckBoxCtrl?.setChecked === 'function') {
+                        runInFormContext(entry.row, () => {
+                            windowRef.D3Api.CheckBoxCtrl.setChecked(entry.control, desired);
+                            target.dispatchEvent(new windowRef.Event('change', {
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                        });
+                        changedMethods.push('d3_set_checked_change');
+                    }
+                } catch (error) {
+                    changedMethods.push('d3_set_checked_failed');
+                }
+            }
+
+            const afterEntries = getDirlineCitoEntries(form)
+                .filter((entry) => entry.itemValue === normalizedItemValue);
+            const availableEntries = afterEntries.filter((entry) => entry.available);
+            const confirmedRows = availableEntries.filter((entry) => entry.checked === desired).length;
+            const confirmed = afterEntries.length > 0
+                && availableEntries.length === afterEntries.length
+                && confirmedRows === afterEntries.length;
+
+            return {
+                itemValue: normalizedItemValue,
+                desired,
+                requested: beforeEntries.length > 0,
+                confirmed,
+                totalRows: afterEntries.length,
+                confirmedRows,
+                disabledCount,
+                methods: Array.from(new Set(changedMethods)),
+                reason: confirmed
+                    ? (changedMethods.length > 0 ? 'cito_applied' : 'cito_already_applied')
+                    : (afterEntries.length === 0
+                        ? 'dirline_row_missing'
+                        : (availableEntries.length !== afterEntries.length
+                            ? 'cito_control_unavailable'
+                            : (disabledCount > 0 ? 'cito_control_disabled' : 'cito_not_confirmed')))
             };
         };
 
@@ -1445,6 +1603,7 @@
                 researchGrid: GRID_RESEARCH_SELECTOR,
                 dirlineGrid: GRID_DIRLINE_SELECTOR,
                 researchCheckbox: RESEARCH_CHECKBOX_SELECTOR,
+                citoControl: CITO_CONTROL_SELECTOR,
                 scheduleForm: SCHEDULE_FORM_SELECTOR,
                 scheduleGrid: SCHEDULE_GRID_SELECTOR,
                 cabinetPickerGrid: CABINET_PICKER_GRID_SELECTOR
@@ -1464,6 +1623,8 @@
             captureResearchRows,
             hasResearchRowsTransition,
             getSelectedResearchState,
+            getDirlineCitoEntries,
+            requestDirlineCito,
             findAllResearchesRow,
             isAllResearchesActive,
             requestAllResearches,

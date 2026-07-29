@@ -16,7 +16,7 @@ const adapter = read('bars-adapter.js');
 const runner = read('fill-runner.js');
 const version = manifest.version;
 
-assert(version === '5.1.10', `unexpected manifest version: ${version}`);
+assert(version === '5.1.11', `unexpected manifest version: ${version}`);
 assert(popup.includes(`const EXTENSION_VERSION = '${version}'`), 'popup version is not synchronized');
 assert(popup.includes('loadedManifestVersion !== EXTENSION_VERSION')
     && popup.includes('Загружена смешанная версия')
@@ -55,7 +55,8 @@ assert(background.includes('function probeScheduleResumeState()')
     && background.includes("case 'resume_schedule':"),
     'service worker does not safely resume a destroyed MAIN schedule context');
 assert(runner.includes('if (resumeScheduleOnly)')
-    && runner.includes('prepareScheduleForAssignment({ scheduleAlreadyOpen: true })')
+    && runner.includes('scheduleAlreadyOpen: true,')
+    && runner.includes('urgentResult: resumedUrgentResult')
     && runner.includes("debugLog('schedule_resume:start'")
     && runner.includes("method: 'schedule_resume'"),
     'runner does not provide a schedule-only continuation without a second Assign click');
@@ -66,18 +67,33 @@ assert(runner.includes('[name="byNaprAnalyseLab"]'), 'source laboratory button i
 assert(runner.includes('[name="linkDirLineOrder"]'), 'visit sidebar laboratory link is missing');
 assert(runner.includes('[onclick*=".openDirLineOrder"]'), 'disease-case laboratory link is missing');
 
-const urgentStopIndex = runner.indexOf("debugLog('fill:blocked_before_research_selection_for_urgent'");
-const urgentReturnIndex = runner.indexOf('return attachDiagnostics({', urgentStopIndex);
-const researchSelectionIndex = runner.indexOf('// Проверяем количество чек-боксов', urgentStopIndex);
-const assignClickIndex = runner.indexOf('scheduleOpened = await clickAssignButton()');
-assert(urgentStopIndex >= 0
-    && urgentReturnIndex > urgentStopIndex
-    && researchSelectionIndex > urgentReturnIndex
-    && assignClickIndex >= 0
-    && runner.includes('исследования не изменялись, кнопка «Назначить» не нажималась'),
-    'urgent mode is not stopped before research mutation and the server-side Assign action');
+const researchSelectionIndex = runner.indexOf('// Проверяем количество чек-боксов');
+const urgentApplyIndex = runner.indexOf('const urgentResult = shouldMarkUrgent', researchSelectionIndex);
+const urgentBlockIndex = runner.indexOf("debugLog('fill:blocked_before_assign_for_urgent'", urgentApplyIndex);
+const scheduleCallIndex = runner.indexOf('scheduleResult = await prepareScheduleForAssignment({ urgentResult });', urgentApplyIndex);
+assert(researchSelectionIndex >= 0
+    && urgentApplyIndex > researchSelectionIndex
+    && urgentBlockIndex > urgentApplyIndex
+    && scheduleCallIndex > urgentBlockIndex
+    && runner.includes("debugLog('urgent:apply_start'")
+    && runner.includes("debugLog('urgent:item_result'")
+    && runner.includes("debugLog('urgent:apply_complete'")
+    && runner.includes('выполнение остановлено до кнопки «Назначить»'),
+    'CITO is not applied and verified in GridDirline before the server-side Assign action');
+assert(!runner.includes('fill:blocked_before_research_selection_for_urgent')
+    && !runner.includes('urgent_requires_research_order'),
+    'obsolete fail-closed CITO placeholder is still present');
 assert(!runner.includes('setUrgentCheckboxesInSchedule'),
     'obsolete schedule-level urgent mutation is still present');
+assert(adapter.includes("const CITO_CONTROL_SELECTOR = '[name=\"Cito\"]'")
+    && adapter.includes('const getDirlineCitoEntries =')
+    && adapter.includes('const requestDirlineCito =')
+    && adapter.includes('windowRef.D3Api.CheckBoxCtrl.getValue(control)')
+    && adapter.includes('runInFormContext(entry.row, () => target.click())')
+    && adapter.includes('windowRef.D3Api.CheckBoxCtrl.setChecked(entry.control, desired)')
+    && adapter.includes("reason: confirmed")
+    && adapter.includes("'cito_not_confirmed'"),
+    'adapter does not use and verify the source-backed GridDirline CITO controls');
 assert(runner.includes("method: 'exact_dom_source_fallback'"),
     'real BARS fallback for an unavailable Form namespace is missing');
 assert(runner.includes('runtimeFirstTimeWasObservedTrue = runtimeBeforeWait.isFirstTime === true')

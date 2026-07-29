@@ -1,13 +1,13 @@
 (function initializeFillBARSRunner(globalScope) {
     'use strict';
 
-    const VERSION = '5.1.10';
+    const VERSION = '5.1.11';
 
 async function fillForm(formData, profileName, assignmentSettings = {}, diagnosticRunId = '', diagnosticBridgeToken = '') {
     console.log("╔════════════════════════════════════════════════════════════╗");
     console.log("║  МИС БАРС - Автоматическое назначение анализов           ║");
     console.log("║  Разработчик: MorozovRV and Bitucckii VA                 ║");
-    console.log("║  Версия: 5.1.10                                           ║");
+    console.log("║  Версия: 5.1.11                                           ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
 
@@ -84,7 +84,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
                 reason: payload.fatalError
                     ? 'unhandled_error'
                     : (blocked
-                        ? 'urgent_requires_research_order'
+                        ? (payload.blockReason || payload.scheduleResult?.reason || 'workflow_blocked')
                         : (payload.skipped
                         ? 'frame_skipped'
                         : (scheduleIncomplete ? 'schedule_incomplete' : 'page_completed'))),
@@ -1056,6 +1056,81 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
     };
 
     const getRequestedItemValues = () => Object.keys(formData).filter((itemValue) => formData[itemValue] === true || formData[itemValue] === false);
+    const getRequestedSelectedItemValues = () => Object.keys(formData).filter((itemValue) => formData[itemValue] === true);
+    const getSkippedUrgentResult = () => ({
+        selected: 0,
+        total: 0,
+        stopped: false,
+        skipped: true,
+        complete: true,
+        reason: 'urgent_not_requested'
+    });
+    const applyUrgentToSelectedResearches = async () => {
+        const requestedItemValues = getRequestedSelectedItemValues();
+        const itemResults = [];
+        const failedItemValues = [];
+        let selected = 0;
+        let rowsSelected = 0;
+        let rowsTotal = 0;
+
+        debugLog('urgent:apply_start', {
+            total: requestedItemValues.length,
+            requestedItemValues
+        });
+
+        for (const itemValue of requestedItemValues) {
+            const rawResult = typeof barsAdapter.requestDirlineCito === 'function'
+                ? barsAdapter.requestDirlineCito(itemValue, true, barsAdapter.findOrderForm())
+                : {
+                    itemValue,
+                    requested: false,
+                    confirmed: false,
+                    totalRows: 0,
+                    confirmedRows: 0,
+                    reason: 'adapter_method_missing'
+                };
+            const result = {
+                itemValue,
+                requested: rawResult.requested === true,
+                confirmed: rawResult.confirmed === true,
+                totalRows: Number(rawResult.totalRows) || 0,
+                confirmedRows: Number(rawResult.confirmedRows) || 0,
+                disabledCount: Number(rawResult.disabledCount) || 0,
+                methods: Array.isArray(rawResult.methods) ? rawResult.methods : [],
+                reason: rawResult.reason || 'cito_not_confirmed'
+            };
+
+            itemResults.push(result);
+            rowsSelected += result.confirmedRows;
+            rowsTotal += result.totalRows;
+            if (result.confirmed) {
+                selected += 1;
+            } else {
+                failedItemValues.push(itemValue);
+            }
+
+            debugLog('urgent:item_result', result);
+            await sleep(80);
+        }
+
+        const complete = requestedItemValues.length > 0
+            && selected === requestedItemValues.length
+            && failedItemValues.length === 0;
+        const result = {
+            selected,
+            total: requestedItemValues.length,
+            rowsSelected,
+            rowsTotal,
+            stopped: !complete,
+            skipped: false,
+            complete,
+            reason: complete ? 'cito_applied' : 'cito_selection_incomplete',
+            failedItemValues,
+            itemResults
+        };
+        debugLog('urgent:apply_complete', result);
+        return result;
+    };
 
     debugLog('fill:start', {
         diagnosticRunId,
@@ -1071,37 +1146,6 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
         requestedItemValues: getRequestedItemValues(),
         resumeScheduleOnly
     });
-
-    if (shouldMarkUrgent) {
-        const reason = 'urgent_requires_research_order';
-        const requestedItemValues = getRequestedItemValues();
-        const scheduleResult = {
-            stage: normalizedAssignmentStage,
-            message: 'режим «Срочно» требует ручной установки CITO; исследования не изменялись, кнопка «Назначить» не нажималась',
-            opened: false,
-            complete: false,
-            blocked: true,
-            cabinets: { selected: 0, total: 0, stopped: true, skipped: true, reason },
-            urgent: { selected: 0, total: 0, stopped: true, skipped: false, complete: false, reason }
-        };
-        debugLog('fill:blocked_before_research_selection_for_urgent', {
-            reason,
-            assignmentStage: normalizedAssignmentStage,
-            requestedTotal: requestedItemValues.length
-        });
-        console.warn('Режим «Срочно» остановлен до выбора исследований: CITO должен устанавливаться в строках GridResearch до их добавления в GridDirline.');
-        return attachDiagnostics({
-            blocked: true,
-            message: scheduleResult.message,
-            filledCount: 0,
-            totalFound: 0,
-            pagesProcessed: 0,
-            missingCount: requestedItemValues.length,
-            missingItemValues: requestedItemValues,
-            assignmentStage: normalizedAssignmentStage,
-            scheduleResult
-        });
-    }
 
     const getVisibleElements = (selector, root = document) => {
         return Array.from(root.querySelectorAll(selector)).filter(isVisible);
@@ -2866,7 +2910,10 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
         return lastReady;
     };
 
-    const prepareScheduleForAssignment = async ({ scheduleAlreadyOpen = false } = {}) => {
+    const prepareScheduleForAssignment = async ({
+        scheduleAlreadyOpen = false,
+        urgentResult = getSkippedUrgentResult()
+    } = {}) => {
         let scheduleOpened;
         if (scheduleAlreadyOpen) {
             scheduleOpened = !!await waitForCondition(findScheduleForm, 5000);
@@ -2885,7 +2932,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
                 opened: false,
                 complete: false,
                 cabinets: { selected: 0, total: 0, stopped: true, failed: true, reason: 'schedule_not_opened' },
-                urgent: { selected: 0, total: 0, stopped: true, skipped: true, complete: false }
+                urgent: urgentResult
             };
         }
 
@@ -2898,7 +2945,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
                 opened: true,
                 complete: false,
                 cabinets: { selected: 0, total: 0, stopped: true, failed: true, reason: 'schedule_rows_not_ready' },
-                urgent: { selected: 0, total: 0, stopped: true, skipped: true, complete: false }
+                urgent: urgentResult
             };
         }
 
@@ -2908,15 +2955,10 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
         const cabinetsResult = await chooseCabinetsInSchedule();
         await sleep(500);
         if (cabinetsResult.stopped) {
-            const urgentResult = {
-                selected: 0,
-                total: 0,
-                stopped: true,
-                skipped: true,
-                complete: false,
-                reason: 'cabinets_incomplete'
-            };
-            const resultMessage = `кабинеты: ${cabinetsResult.selected}/${cabinetsResult.total}, срочно: пропущено из-за незавершённого выбора кабинетов`;
+            const urgentMessage = urgentResult.skipped
+                ? 'CITO: не запрошено'
+                : `CITO: ${urgentResult.selected}/${urgentResult.total}`;
+            const resultMessage = `кабинеты: ${cabinetsResult.selected}/${cabinetsResult.total}, ${urgentMessage}`;
             debugLog('schedule:stopped_after_cabinets', { resultMessage, snapshot: getScheduleDebugSnapshot() });
             console.warn(`Подбор времени остановлен (${resultMessage}). Кнопка "Записать" не нажималась.`);
             return {
@@ -2929,13 +2971,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
             };
         }
 
-        const rawUrgentResult = { selected: 0, total: 0, skipped: true };
-        const urgentComplete = true;
-        const urgentResult = {
-            ...rawUrgentResult,
-            stopped: !urgentComplete,
-            complete: urgentComplete
-        };
+        const urgentComplete = urgentResult.complete === true;
         const cabinetsComplete = cabinetsResult.total > 0
             && cabinetsResult.selected === cabinetsResult.total
             && cabinetsResult.stopped !== true
@@ -2943,7 +2979,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
         const complete = cabinetsComplete && urgentComplete;
         const resultMessage = [
             `кабинеты: ${cabinetsResult.selected}/${cabinetsResult.total}`,
-            urgentResult.skipped ? 'срочно: пропущено' : `срочно: ${urgentResult.selected}/${urgentResult.total}`
+            urgentResult.skipped ? 'CITO: не запрошено' : `CITO: ${urgentResult.selected}/${urgentResult.total}`
         ].join(', ');
         const message = complete
             ? `подбор времени подготовлен (${resultMessage})`
@@ -2962,11 +2998,32 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
 
     if (resumeScheduleOnly) {
         const resumedFilledCount = Math.max(0, Number(assignmentSettings?.resumeFilledCount) || 0);
+        const resumedUrgentTotal = getRequestedSelectedItemValues().length;
+        const resumedUrgentResult = shouldMarkUrgent
+            ? {
+                selected: resumedUrgentTotal,
+                total: resumedUrgentTotal,
+                rowsSelected: resumedUrgentTotal,
+                rowsTotal: resumedUrgentTotal,
+                stopped: resumedUrgentTotal === 0,
+                skipped: false,
+                complete: resumedUrgentTotal > 0,
+                resumed: true,
+                reason: resumedUrgentTotal > 0
+                    ? 'cito_applied_before_schedule_resume'
+                    : 'cito_resume_count_missing',
+                failedItemValues: []
+            }
+            : getSkippedUrgentResult();
         debugLog('schedule_resume:start', {
             resumedFilledCount,
+            resumedUrgentResult,
             scheduleFormPresent: !!findScheduleForm()
         });
-        const scheduleResult = await prepareScheduleForAssignment({ scheduleAlreadyOpen: true });
+        const scheduleResult = await prepareScheduleForAssignment({
+            scheduleAlreadyOpen: true,
+            urgentResult: resumedUrgentResult
+        });
         const message = `Продолжение подбора времени: ${scheduleResult.message}`;
         debugLog('schedule_resume:complete', {
             resumedFilledCount,
@@ -3160,21 +3217,56 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
         }
     }
 
+    const urgentResult = shouldMarkUrgent
+        ? await applyUrgentToSelectedResearches()
+        : getSkippedUrgentResult();
+
     let scheduleResult = null;
-    if (normalizedAssignmentStage === ASSIGNMENT_STAGE_ANALYSES) {
+    if (shouldMarkUrgent && urgentResult.complete !== true) {
+        const reason = urgentResult.reason || 'cito_selection_incomplete';
+        const urgentMessage = `CITO установлено для ${urgentResult.selected}/${urgentResult.total} исследований`;
+        scheduleResult = {
+            stage: normalizedAssignmentStage,
+            message: `${urgentMessage}; выполнение остановлено до кнопки «Назначить»`,
+            opened: false,
+            complete: false,
+            blocked: true,
+            reason,
+            cabinets: {
+                selected: 0,
+                total: 0,
+                stopped: true,
+                skipped: true,
+                reason: 'urgent_incomplete'
+            },
+            urgent: urgentResult
+        };
+        debugLog('fill:blocked_before_assign_for_urgent', {
+            reason,
+            urgentResult,
+            remainingItemValues: Array.from(remainingItemValues)
+        });
+        console.warn(`${urgentMessage}. Кнопка "Назначить" не нажималась.`);
+    } else if (normalizedAssignmentStage === ASSIGNMENT_STAGE_ANALYSES) {
+        const urgentMessage = urgentResult.skipped
+            ? ''
+            : `; CITO: ${urgentResult.selected}/${urgentResult.total}`;
         scheduleResult = {
             stage: ASSIGNMENT_STAGE_ANALYSES,
-            message: 'остановлено после выбора анализов',
+            message: `остановлено после выбора анализов${urgentMessage}`,
             opened: false,
             complete: true,
             skipped: true,
             cabinets: { selected: 0, total: 0, stopped: false, skipped: true },
-            urgent: { selected: 0, total: 0, stopped: false, skipped: true, complete: true }
+            urgent: urgentResult
         };
-        debugLog('schedule:skipped_by_setting', { assignmentStage: normalizedAssignmentStage });
+        debugLog('schedule:skipped_by_setting', {
+            assignmentStage: normalizedAssignmentStage,
+            urgentResult
+        });
         console.log('Настройка сценария: остановка после выбора анализов. Кнопку "Назначить" не нажимаю.');
     } else if (filledCount > 0) {
-        scheduleResult = await prepareScheduleForAssignment();
+        scheduleResult = await prepareScheduleForAssignment({ urgentResult });
     } else {
         scheduleResult = {
             stage: ASSIGNMENT_STAGE_SCHEDULE,
@@ -3183,7 +3275,7 @@ async function fillForm(formData, profileName, assignmentSettings = {}, diagnost
             complete: false,
             skipped: true,
             cabinets: { selected: 0, total: 0, stopped: true, skipped: true, reason: 'no_researches_processed' },
-            urgent: { selected: 0, total: 0, stopped: true, skipped: true, complete: false }
+            urgent: urgentResult
         };
         console.warn('Анализы не были обработаны, кнопку "Назначить" не нажимаю.');
     }

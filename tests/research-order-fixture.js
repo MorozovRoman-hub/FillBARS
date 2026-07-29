@@ -41,12 +41,13 @@
         return element;
     };
 
-    const createScenario = (variant) => {
+    const createScenario = (variant, options = {}) => {
         host.replaceChildren();
 
         const metrics = {
             variant,
             checkboxClicks: new Map(),
+            citoClicks: new Map(),
             insertedAt: new Map(),
             nextRequestedAt: [],
             assignClicks: 0,
@@ -121,6 +122,24 @@
         summaryRow.append(createElement('td', {}, 'Итого'));
         dirlineBody.append(summaryRow);
 
+        const attachCitoControl = (row, itemValue) => {
+            const cell = document.createElement('td');
+            const cito = createElement('input', {
+                type: 'checkbox',
+                name: 'Cito'
+            });
+            cito.disabled = Array.isArray(options.disabledCitoIds)
+                && options.disabledCitoIds.includes(itemValue);
+            cito.addEventListener('click', () => {
+                metrics.citoClicks.set(itemValue, (metrics.citoClicks.get(itemValue) || 0) + 1);
+                row.clone.data.IS_CITO = cito.checked ? 1 : 0;
+                row._node.data.IS_CITO = row.clone.data.IS_CITO;
+            });
+            cell.append(cito);
+            row.append(cell);
+            return cito;
+        };
+
         const appendSelectedFixtureRow = ({ attributeValue, cloneValue, treeValue, text }) => {
             const row = createElement('tr', { cmptype: 'TreeRow' });
             if (attributeValue !== undefined) {
@@ -129,6 +148,12 @@
             row.clone = { data: { RS_ID: cloneValue } };
             row._node = { data: { RS_ID: treeValue } };
             row.append(createElement('td', {}, text));
+            const itemValue = [attributeValue, cloneValue, treeValue]
+                .map((value) => String(value ?? '').trim())
+                .find((value) => value && !['on', 'null', 'undefined'].includes(value.toLowerCase()));
+            if (itemValue) {
+                attachCitoControl(row, itemValue);
+            }
             dirlineBody.insertBefore(row, summaryRow);
             return row;
         };
@@ -187,6 +212,7 @@
                 row.setAttribute('rs_id_keyvalue', 'null');
             }
             row.append(createElement('td', {}, itemValue));
+            attachCitoControl(row, itemValue);
             dirlineBody.insertBefore(row, summaryRow);
             selectedIds.add(itemValue);
             metrics.insertedAt.set(itemValue, performance.now());
@@ -311,6 +337,12 @@
             : {};
         window.D3Api = {
             GridCtrl: d3GridCtrl,
+            CheckBoxCtrl: {
+                getValue: (control) => control.checked ? 1 : 0,
+                setChecked: (control, checked) => {
+                    control.checked = checked === true;
+                }
+            },
             RangeCtrl: {
                 setRange: (rangeElement, page, amount) => {
                     assert(rangeElement === range, `${variant}: размер меняется на Range GridResearch`);
@@ -518,6 +550,30 @@
         assert((scenario.metrics.checkboxClicks.get('RS-151') || 0) === 1, `${variant}: checkbox второй страницы нажат один раз`);
         assert(scenario.metrics.nextRequestedAt[0] >= scenario.metrics.insertedAt.get('RS-149'), `${variant}: переход дождался медленной вставки первой страницы`);
         assert(scenario.metrics.insertedAt.has('RS-151'), `${variant}: завершение дождалось медленной вставки второй страницы`);
+
+        for (const itemValue of ['RS-001', 'RS-149', 'RS-151']) {
+            const citoResult = adapter.requestDirlineCito(itemValue, true, form);
+            assert(citoResult.requested
+                && citoResult.confirmed
+                && citoResult.totalRows >= 1
+                && citoResult.confirmedRows === citoResult.totalRows,
+            `${variant}: CITO для ${itemValue} установлен и подтверждён через GridDirline`, citoResult);
+        }
+        const citoEntries = adapter.getDirlineCitoEntries(form);
+        assert(['RS-001', 'RS-149', 'RS-151'].every((itemValue) => (
+            citoEntries.some((entry) => entry.itemValue === itemValue && entry.checked)
+        )), `${variant}: итоговое состояние CITO читается из строк GridDirline`);
+        const rs001CitoClicks = scenario.metrics.citoClicks.get('RS-001') || 0;
+        const repeatedCito = adapter.requestDirlineCito('RS-001', true, form);
+        assert(repeatedCito.confirmed
+            && repeatedCito.reason === 'cito_already_applied'
+            && (scenario.metrics.citoClicks.get('RS-001') || 0) === rs001CitoClicks,
+        `${variant}: уже установленный CITO повторно не переключается`, repeatedCito);
+        const missingCito = adapter.requestDirlineCito('RS-999', true, form);
+        assert(!missingCito.requested
+            && !missingCito.confirmed
+            && missingCito.reason === 'dirline_row_missing',
+        `${variant}: отсутствующая строка CITO завершается fail-closed`, missingCito);
         assert(scenario.metrics.assignClicks === 0, `${variant}: кнопка «Назначить» не нажата`);
 
         return {
@@ -527,6 +583,7 @@
             confirmed: Array.from(confirmed),
             missing: Array.from(remaining),
             checkboxClicks: Object.fromEntries(scenario.metrics.checkboxClicks),
+            citoClicks: Object.fromEntries(scenario.metrics.citoClicks),
             assignClicks: scenario.metrics.assignClicks
         };
     };
@@ -576,16 +633,62 @@
         };
     };
 
+    const runRunnerCitoScenario = async ({ blocked = false } = {}) => {
+        const scenario = createScenario('d3', {
+            disabledCitoIds: blocked ? ['RS-001'] : []
+        });
+        const result = await window.__FillBARS_RUNNER__.run(
+            blocked
+                ? { 'RS-001': true }
+                : { 'RS-001': true, 'RS-149': true },
+            blocked ? 'fixture CITO fail-closed' : 'fixture CITO success',
+            {
+                assignmentStage: blocked ? 'schedule' : 'analyses',
+                targetCabinet: blocked ? 'Кабинет fixture' : '',
+                markUrgent: true
+            }
+        );
+
+        if (blocked) {
+            assert(result.scheduleResult?.blocked === true
+                && result.scheduleResult?.reason === 'cito_selection_incomplete'
+                && result.scheduleResult?.urgent?.selected === 0
+                && result.scheduleResult?.urgent?.total === 1,
+            'runner: неподтверждённый CITO блокирует сценарий до Assign', result.scheduleResult);
+            assert(scenario.metrics.assignClicks === 0,
+                'runner: при неподтверждённом CITO кнопка «Назначить» не нажата');
+        } else {
+            assert(result.filledCount === 2
+                && result.missingCount === 0
+                && result.scheduleResult?.complete === true
+                && result.scheduleResult?.urgent?.selected === 2
+                && result.scheduleResult?.urgent?.total === 2,
+            'runner: CITO установлен для всех выбранных исследований', result);
+            assert(scenario.metrics.assignClicks === 0,
+                'runner: этап «Только анализы» с CITO не нажимает «Назначить»');
+        }
+
+        return {
+            blocked,
+            filledCount: result.filledCount,
+            urgent: result.scheduleResult?.urgent,
+            assignClicks: scenario.metrics.assignClicks
+        };
+    };
+
     try {
-        assert(window.FillBARSAdapter?.version === '5.1.10', 'Загружен адаптер FillBARS 5.1.10');
+        assert(window.FillBARSAdapter?.version === '5.1.11', 'Загружен адаптер FillBARS 5.1.11');
         const legacy = await runScenario('legacy');
         const d3 = await runScenario('d3');
         const d3Fallback = await runD3ActivationFallbackScenario();
+        const runnerCitoSuccess = await runRunnerCitoScenario();
+        const runnerCitoBlocked = await runRunnerCitoScenario({ blocked: true });
         const report = {
             status: 'passed',
             assertions: assertions.length,
             scenarios: [legacy, d3],
-            fallbacks: [d3Fallback]
+            fallbacks: [d3Fallback],
+            runnerCito: [runnerCitoSuccess, runnerCitoBlocked]
         };
         document.body.dataset.testStatus = 'passed';
         status.textContent = `PASS — ${assertions.length} проверок`;

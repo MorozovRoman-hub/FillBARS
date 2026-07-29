@@ -28,6 +28,9 @@ try {
         const result = spawnSync(executablePath, [
             '--headless=new',
             '--disable-gpu',
+            '--disable-gpu-compositing',
+            '--disable-software-rasterizer',
+            '--disable-features=Vulkan,Dawn',
             '--no-first-run',
             '--no-default-browser-check',
             '--allow-file-access-from-files',

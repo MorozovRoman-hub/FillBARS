@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.1.10';
+const EXTENSION_VERSION = '5.1.11';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -839,8 +839,8 @@ function updateAssignmentStageUi(settings = getAssignmentSettings()) {
     slider.disabled = !canUseSchedule;
     slider.value = normalizedSettings.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE ? '1' : '0';
     label.textContent = canUseSchedule && normalizedSettings.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE
-        ? (normalizedSettings.markUrgent ? 'Кабинеты и срочно' : 'Кабинеты')
-        : 'Только анализы';
+        ? (normalizedSettings.markUrgent ? 'Кабинеты и CITO' : 'Кабинеты')
+        : (normalizedSettings.markUrgent ? 'Только анализы и CITO' : 'Только анализы');
 
     if (targetCabinetInput) {
         targetCabinetInput.value = normalizedSettings.targetCabinet;
@@ -861,7 +861,7 @@ function updateAssignmentStageUi(settings = getAssignmentSettings()) {
     if (hint) {
         hint.textContent = canUseSchedule
             ? ''
-            : 'Укажите кабинет, чтобы включить этап кабинетов.';
+            : 'CITO применяется к выбранным анализам; укажите кабинет, чтобы дополнительно включить расписание.';
     }
 }
 
@@ -3483,7 +3483,7 @@ document.getElementById('fillForm').addEventListener('click', () => {
                         const isBlocked = result.blocked === true || result.scheduleResult?.blocked === true;
                         const blockedReason = result.runnerBusy === true
                             ? 'runner_already_active'
-                            : 'urgent_requires_research_order';
+                            : (result.blockReason || result.scheduleResult?.reason || 'workflow_blocked');
                         const scheduleIncomplete = result.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE
                             && result.scheduleResult?.complete !== true;
                         const hasMissingResearches = (result.missingCount || 0) > 0;
