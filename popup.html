@@ -115,6 +115,14 @@
             resize: vertical;
         }
 
+        .diagnostic-log {
+            min-height: 340px;
+            white-space: pre;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 11px;
+            line-height: 1.35;
+        }
+
         button {
             width: 100%;
             padding: 10px;
@@ -417,13 +425,14 @@
         <button id="openPrintSheet" class="secondary" type="button">🖨 Открыть лист назначений</button>
         <button id="saveJournalEntry" class="secondary" type="button">💾 Сохранить в журнал</button>
         <button id="openJournal" class="ghost" type="button">📚 Журнал назначений</button>
+        <button id="openDiagnostics" class="ghost" type="button">🧭 Диагностика запусков</button>
         <button id="closePopup" class="close-btn" type="button">✖ Закрыть</button>
     </div>
 
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.1 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.1.10 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
@@ -593,6 +602,25 @@
             Записи хранятся локально до 60 дней. Сохраняются № медицинской карты и назначения; ФИО и дата рождения не записываются.
         </div>
         <div id="journalList" class="section"></div>
+    </div>
+
+    <div id="diagnosticPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>🧭 Диагностика FillBARS</h3>
+            <button id="closeDiagnostics" class="small-btn danger" type="button">Закрыть</button>
+        </div>
+        <div class="warning">
+            Логи сохраняются только локально и автоматически не отправляются. Они содержат название профиля и технические ID исследований; перед передачей проверьте JSON. FillBARS не добавляет в журнал ФИО, номер карты, дату рождения, адрес и заголовок страницы.
+        </div>
+        <div id="diagnosticSummary" class="hint"></div>
+        <label for="diagnosticRunSelect">Сохранённый запуск</label>
+        <select id="diagnosticRunSelect" aria-label="Сохранённый диагностический запуск"></select>
+        <textarea id="diagnosticLog" class="diagnostic-log" readonly spellcheck="false" aria-label="Выбранный диагностический запуск"></textarea>
+        <div class="button-stack settings-button">
+            <button id="copyDiagnostics" type="button">Копировать выбранный запуск</button>
+            <button id="exportDiagnostics" class="secondary" type="button">Выгрузить JSON</button>
+            <button id="clearDiagnostics" class="danger" type="button">Удалить диагностические логи</button>
+        </div>
     </div>
 
     <script src="popup.js"></script>

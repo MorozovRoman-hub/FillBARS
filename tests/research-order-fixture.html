@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FillBARS — стенд формы заказа исследований</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            margin: 24px;
+            color: #172033;
+            background: #f4f7fb;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 24px;
+        }
+
+        #status {
+            margin-bottom: 18px;
+            font-weight: 700;
+        }
+
+        #fixture-host,
+        #results {
+            padding: 16px;
+            border: 1px solid #c9d3e3;
+            border-radius: 10px;
+            background: white;
+        }
+
+        #results {
+            margin-top: 16px;
+            white-space: pre-wrap;
+        }
+
+        .window,
+        .dirline_order_alt,
+        [name="GridGroups"],
+        [name="GridResearch"],
+        [name="GridDirline"],
+        [cmptype="Range"] {
+            display: block;
+            min-width: 1px;
+            min-height: 1px;
+        }
+
+        [name="GridGroups"],
+        [name="GridResearch"],
+        [name="GridDirline"] {
+            margin: 8px 0;
+            padding: 8px;
+            border: 1px solid #d9e0eb;
+        }
+
+        [name="GridResearch"] label {
+            display: inline-block;
+            width: 155px;
+            padding: 2px;
+        }
+
+        button,
+        [cmptype="GridRow"] {
+            cursor: pointer;
+        }
+
+        [cmptype="GridRow"].active {
+            font-weight: 700;
+            color: #0d62c7;
+        }
+
+        .fixture-decoy {
+            position: absolute;
+            left: -10000px;
+            width: 10px;
+            height: 10px;
+        }
+    </style>
+</head>
+<body data-test-status="running">
+    <h1>FillBARS: source-driven стенд заказа исследований</h1>
+    <div id="status">Выполняются проверки…</div>
+    <div id="fixture-host" aria-label="DOM БАРС для текущего сценария"></div>
+    <pre id="results" aria-live="polite"></pre>
+
+    <script src="../bars-adapter.js"></script>
+    <script src="research-order-fixture.js"></script>
+</body>
+</html>

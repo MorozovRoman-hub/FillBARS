@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FillBARS — стенд расписания</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            margin: 24px;
+            color: #172033;
+            background: #f4f7fb;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 24px;
+        }
+
+        #status {
+            margin-bottom: 18px;
+            font-weight: 700;
+        }
+
+        #fixture-host,
+        #results {
+            padding: 16px;
+            border: 1px solid #c9d3e3;
+            border-radius: 10px;
+            background: white;
+        }
+
+        #results {
+            margin-top: 16px;
+            white-space: pre-wrap;
+        }
+
+        .window,
+        .form-schedule,
+        [cmptype="Form"],
+        [name="GridServices"],
+        [name="Grid1"] {
+            display: block;
+            min-width: 320px;
+            min-height: 1px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        td {
+            padding: 6px;
+            border: 1px solid #d9e0eb;
+        }
+
+        [cmptype="GridRow"] {
+            cursor: pointer;
+        }
+
+        [cmptype="GridRow"].active {
+            color: #0d62c7;
+            font-weight: 700;
+        }
+
+        .cabinet-picker {
+            position: relative;
+            z-index: 100;
+            margin-top: 14px;
+            padding: 10px;
+            border: 2px solid #0d62c7;
+            background: #fff;
+        }
+    </style>
+</head>
+<body data-test-status="running">
+    <h1>FillBARS: source-driven стенд расписания</h1>
+    <div id="status">Выполняются проверки…</div>
+    <div id="fixture-host" aria-label="DOM БАРС для стенда расписания"></div>
+    <pre id="results" aria-live="polite"></pre>
+
+    <script src="../bars-adapter.js"></script>
+    <script src="schedule-fixture.js"></script>
+</body>
+</html>
