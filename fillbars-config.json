@@ -1,5 +1,109 @@
 {
   "templates": {
+    "🩸 Острый тромбофлебит": {
+      "analyses": {
+        "95436220": true,
+        "95435802": true,
+        "1329757354": true,
+        "141778961": true,
+        "141779417": true,
+        "14184265605": true,
+        "97830108": true,
+        "97829650": true,
+        "97829683": true,
+        "97830039": true,
+        "97830130": true,
+        "14767125442": true,
+        "14767094583": true,
+        "14767110898": true,
+        "14767140828": true,
+        "97830076": true
+      },
+      "medications": [
+        {
+          "id": "manual-pentoxifylline-thrombophlebitis",
+          "source": "manual",
+          "atc": "C04AD",
+          "name": "пентоксифиллин",
+          "form": "раствор для инфузий",
+          "dose": "400 мл",
+          "route": "в/в кап.",
+          "frequency": "через день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-heparin-infusion-thrombophlebitis",
+          "source": "manual",
+          "atc": "B01AB",
+          "name": "гепарин натрия + натрия хлорид 0,9%",
+          "form": "раствор для инфузии",
+          "dose": "10 000 ЕД + 400 мл",
+          "route": "в/в кап.",
+          "frequency": "однократно",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-heparin-subcutaneous-thrombophlebitis",
+          "source": "manual",
+          "atc": "B01AB",
+          "name": "гепарин натрия",
+          "form": "раствор для инъекций",
+          "dose": "10 000 ЕД",
+          "route": "п/к",
+          "frequency": "3 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-ketorolac-thrombophlebitis",
+          "source": "manual",
+          "atc": "M01AB",
+          "name": "кеторолак",
+          "form": "таблетки",
+          "dose": "1 таблетка",
+          "route": "внутрь",
+          "frequency": "2 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "A02BC-omeprazole-thrombophlebitis",
+          "source": "catalog",
+          "atc": "A02BC",
+          "name": "омепразол",
+          "form": "капсулы",
+          "dose": "20 мг",
+          "route": "внутрь",
+          "frequency": "2 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        }
+      ],
+      "procedures": [
+        {
+          "id": "procedure-diet-1-thrombophlebitis",
+          "name": "Диета №1",
+          "comment": ""
+        },
+        {
+          "id": "procedure-ecg-thrombophlebitis",
+          "name": "ЭКГ",
+          "comment": ""
+        },
+        {
+          "id": "procedure-vein-ultrasound-thrombophlebitis",
+          "name": "УЗИ вен нижних конечностей",
+          "comment": ""
+        }
+      ]
+    },
     "🔴 Острый панкреатит": {
       "analyses": {
         "95436220": true,
@@ -23,7 +127,134 @@
         "141779417": true,
         "1329757354": true
       },
-      "medications": []
+      "medications": [
+        {
+          "id": "J01DD-ceftriaxone-pancreatitis",
+          "source": "catalog",
+          "atc": "J01DD",
+          "name": "цефтриаксон",
+          "form": "порошок для приготовления раствора для внутримышечного введения",
+          "dose": "1,0 г",
+          "route": "в/м",
+          "frequency": "2 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-aminocaproic-pancreatitis",
+          "source": "manual",
+          "atc": "B02AA",
+          "name": "аминокапроновая кислота",
+          "form": "раствор для инфузий 5%",
+          "dose": "100 мл",
+          "route": "в/в",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-sodium-chloride-pancreatitis",
+          "source": "manual",
+          "atc": "B05XA",
+          "name": "натрия хлорид 0,9%",
+          "form": "раствор для инфузий",
+          "dose": "500 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-ringer-locke-pancreatitis",
+          "source": "manual",
+          "atc": "B05BB",
+          "name": "раствор Рингера — Локка",
+          "form": "раствор для инфузий",
+          "dose": "400 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-ketorolac-pancreatitis",
+          "source": "manual",
+          "atc": "M01AB",
+          "name": "кеторолак",
+          "form": "раствор для инъекций",
+          "dose": "1,0 мл",
+          "route": "в/м",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "A02BC-omeprazole-pancreatitis",
+          "source": "catalog",
+          "atc": "A02BC",
+          "name": "омепразол",
+          "form": "лиофилизат для приготовления раствора для внутривенного введения",
+          "dose": "20 мг",
+          "route": "в/в",
+          "frequency": "2 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-papaverine-pancreatitis",
+          "source": "manual",
+          "atc": "A03AD",
+          "name": "папаверин",
+          "form": "раствор для инъекций 2%",
+          "dose": "2,0 мл",
+          "route": "в/м",
+          "frequency": "3 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-fasting-pancreatitis",
+          "source": "manual",
+          "atc": "",
+          "name": "Лечебное питание: голод",
+          "form": "",
+          "dose": "",
+          "route": "",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        }
+      ],
+      "procedures": [
+        {
+          "id": "procedure-egds-pancreatitis",
+          "name": "ЭГДС",
+          "comment": ""
+        },
+        {
+          "id": "procedure-ecg-pancreatitis",
+          "name": "ЭКГ",
+          "comment": ""
+        },
+        {
+          "id": "procedure-ultrasound-pancreatitis",
+          "name": "УЗИ печени, желчного пузыря и поджелудочной железы",
+          "comment": ""
+        },
+        {
+          "id": "procedure-abdominal-xray-pancreatitis",
+          "name": "Рентгенография органов брюшной полости",
+          "comment": ""
+        }
+      ]
     },
     "🟠 Острый аппендицит": {
       "analyses": {
@@ -43,7 +274,344 @@
         "97829731": true,
         "1329757354": true
       },
-      "medications": []
+      "medications": [
+        {
+          "id": "manual-sodium-chloride-appendicitis",
+          "source": "manual",
+          "atc": "B05XA",
+          "name": "натрия хлорид 0,9%",
+          "form": "раствор для инфузий",
+          "dose": "400 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-papaverine-appendicitis",
+          "source": "manual",
+          "atc": "A03AD",
+          "name": "папаверин",
+          "form": "раствор для инъекций 2%",
+          "dose": "0,5 мл",
+          "route": "в/в",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "J01DD-ceftriaxone-appendicitis",
+          "source": "catalog",
+          "atc": "J01DD",
+          "name": "цефтриаксон",
+          "form": "порошок для приготовления раствора для внутривенного введения",
+          "dose": "0,5 г",
+          "route": "в/в кап.",
+          "frequency": "2 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": "с натрия хлоридом 0,9% 400 мл"
+        }
+      ],
+      "procedures": [
+        {
+          "id": "procedure-fasting-cold-appendicitis",
+          "name": "Режим: голод, холод на живот",
+          "comment": ""
+        },
+        {
+          "id": "procedure-ultrasound-appendicitis",
+          "name": "УЗИ органов брюшной полости",
+          "comment": ""
+        }
+      ]
+    },
+    "🩸 Ректальное кровотечение": {
+      "analyses": {
+        "14184231485": true,
+        "14184265605": true,
+        "1329757354": true,
+        "141778961": true,
+        "141779417": true,
+        "95436220": true,
+        "95435802": true,
+        "14767110898": true,
+        "14767140828": true,
+        "97830076": true,
+        "14767094583": true,
+        "97830108": true,
+        "97829650": true,
+        "95436201": true,
+        "95436337": true,
+        "97830130": true
+      },
+      "medications": [
+        {
+          "id": "manual-sodium-chloride-rectal-bleeding",
+          "source": "manual",
+          "atc": "B05XA",
+          "name": "натрия хлорид 0,9%",
+          "form": "раствор для инфузий",
+          "dose": "400 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-calcium-chloride-rectal-bleeding",
+          "source": "manual",
+          "atc": "A12AA",
+          "name": "кальция хлорид",
+          "form": "раствор для инъекций 10%",
+          "dose": "10 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-tranexam-rectal-bleeding",
+          "source": "manual",
+          "atc": "B02AA",
+          "name": "транексамовая кислота + натрия хлорид 0,9%",
+          "form": "раствор для инфузии",
+          "dose": "1000 мг + 400 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-etamsylate-rectal-bleeding",
+          "source": "manual",
+          "atc": "B02BX",
+          "name": "этамзилат",
+          "form": "раствор для инъекций 12,5%",
+          "dose": "2,0 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-aminocaproic-rectal-bleeding",
+          "source": "manual",
+          "atc": "B02AA",
+          "name": "аминокапроновая кислота",
+          "form": "раствор для инфузий 5%",
+          "dose": "100 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-menadione-rectal-bleeding",
+          "source": "manual",
+          "atc": "B02BA",
+          "name": "менадиона натрия бисульфит (викасол)",
+          "form": "раствор для инъекций 1%",
+          "dose": "2,0 мл",
+          "route": "в/м",
+          "frequency": "4 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        }
+      ],
+      "procedures": [
+        {
+          "id": "procedure-diet-1-rectal-bleeding",
+          "name": "Диета №1",
+          "comment": ""
+        },
+        {
+          "id": "procedure-examination-room-rectal-bleeding",
+          "name": "Осмотр в смотровом кабинете",
+          "comment": ""
+        },
+        {
+          "id": "procedure-fluorography-rectal-bleeding",
+          "name": "Флюорография",
+          "comment": ""
+        },
+        {
+          "id": "procedure-ecg-rectal-bleeding",
+          "name": "ЭКГ",
+          "comment": ""
+        },
+        {
+          "id": "procedure-colonoscopy-rectal-bleeding",
+          "name": "Колоноскопия",
+          "comment": ""
+        }
+      ]
+    },
+    "🩸 Желудочно-кишечное кровотечение": {
+      "analyses": {
+        "14184231485": true,
+        "14184265605": true,
+        "1329757354": true,
+        "141778961": true,
+        "141779417": true,
+        "95436220": true,
+        "95435802": true,
+        "97829683": true,
+        "97830039": true,
+        "14767094583": true,
+        "97830108": true,
+        "97829650": true,
+        "97830130": true,
+        "95436201": true,
+        "95436337": true,
+        "14767125442": true,
+        "14767110898": true,
+        "14767140828": true
+      },
+      "medications": [
+        {
+          "id": "manual-sodium-chloride-gib",
+          "source": "manual",
+          "atc": "B05XA",
+          "name": "натрия хлорид 0,9%",
+          "form": "раствор для инфузий",
+          "dose": "1000 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-etamsylate-gib",
+          "source": "manual",
+          "atc": "B02BX",
+          "name": "этамзилат",
+          "form": "раствор для инъекций 12,5%",
+          "dose": "2,0 мл",
+          "route": "в/м",
+          "frequency": "4 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-aminocaproic-gib",
+          "source": "manual",
+          "atc": "B02AA",
+          "name": "аминокапроновая кислота",
+          "form": "раствор для инфузий 5%",
+          "dose": "100 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-menadione-gib",
+          "source": "manual",
+          "atc": "B02BA",
+          "name": "менадиона натрия бисульфит (викасол)",
+          "form": "раствор для инъекций 1%",
+          "dose": "2,0 мл",
+          "route": "в/м",
+          "frequency": "4 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "A02BC-omeprazole-gib",
+          "source": "catalog",
+          "atc": "A02BC",
+          "name": "омепразол",
+          "form": "лиофилизат для приготовления раствора для внутривенного введения",
+          "dose": "40 мг",
+          "route": "в/в",
+          "frequency": "2 раза в день",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-disol-gib",
+          "source": "manual",
+          "atc": "B05BB",
+          "name": "Дисоль",
+          "form": "раствор для инфузий",
+          "dose": "400 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-tranexam-gib",
+          "source": "manual",
+          "atc": "B02AA",
+          "name": "транексамовая кислота + натрия хлорид 0,9%",
+          "form": "раствор для инфузии",
+          "dose": "500 мг + 400 мл",
+          "route": "в/в кап.",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-gastric-tube-gib",
+          "source": "manual",
+          "atc": "",
+          "name": "Зонд в желудок",
+          "form": "",
+          "dose": "",
+          "route": "",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        },
+        {
+          "id": "manual-fasting-gib",
+          "source": "manual",
+          "atc": "",
+          "name": "Лечебное питание: голод",
+          "form": "",
+          "dose": "",
+          "route": "",
+          "frequency": "",
+          "duration": "",
+          "regimen": "",
+          "comment": ""
+        }
+      ],
+      "procedures": [
+        {
+          "id": "procedure-egds-gib",
+          "name": "ЭГДС",
+          "comment": ""
+        },
+        {
+          "id": "procedure-ecg-gib",
+          "name": "ЭКГ",
+          "comment": ""
+        },
+        {
+          "id": "procedure-control-cbc-gib",
+          "name": "Контрольный клинический анализ крови",
+          "comment": "на утро"
+        }
+      ]
     },
     "🟡 Острый холецистит": {
       "analyses": {
@@ -359,20 +927,46 @@
     "journalRetentionDays": 60
   },
   "researchCatalog": {
+    "95436220": "Общий (клинический) анализ крови развернутый",
+    "95435802": "Общий (клинический) анализ мочи",
+    "95436201": "Исследование времени свертывания крови",
+    "95436337": "Исследование времени кровотечения",
+    "95436325": "СОЭ",
+    "95436349": "Ретикулоциты в крови",
+    "1329757354": "Кровь на RW",
+    "141778961": "Определение HBsAg вируса гепатита B в крови",
+    "141778945": "Определение антител IgM и IgG к вирусу гепатита C в крови",
+    "141779417": "Определение антител к вирусу гепатита C в крови",
+    "141779806": "Определение Core-антигена вируса гепатита C в крови",
+    "141779899": "Исследование уровня тиреотропного гормона (ТТГ) в крови",
+    "141779922": "Исследование уровня свободного тироксина (СТ4) в крови",
+    "14184231485": "Определение основных групп крови по системе AB0",
+    "14184265605": "Определение резус-фактора",
+    "15091223625": "Исследование уровня прокальцитонина в крови",
+    "19204896712": "Антистрептолизин О",
+    "12849900445": "Определение содержания антител к кардиолипину в крови",
+    "14767250385": "Проведение глюкозотолерантного теста",
+    "14767261869": "Исследование уровня гликированного гемоглобина в крови",
     "97829568": "Креатинин в крови",
     "97829604": "Холестерин в крови",
     "97829634": "Холестерин липопротеинов высокой плотности",
     "97829650": "Общий белок в крови",
     "97829667": "Холестерин липопротеинов низкой плотности",
     "97829683": "Общий билирубин в крови",
+    "97829699": "Трансферрин сыворотки крови",
+    "97829715": "Ферритин в крови",
     "97829731": "Аланинаминотрансфераза (АлАТ)",
     "97829747": "Аспартатаминотрансфераза (АсАТ)",
     "97829795": "Щелочная фосфатаза в крови",
+    "97829779": "ЛДГ",
+    "97829849": "Мочевая кислота в крови",
+    "97829865": "Железо сыворотки крови",
     "97829833": "Свободный билирубин в крови",
     "97829881": "Калий в крови",
     "97829897": "Общий кальций в крови",
     "97829913": "Натрий в крови",
     "97829930": "Общий магний в сыворотке крови",
+    "97829946": "Ревматоидный фактор в крови",
     "97830039": "Амилаза в крови",
     "97830060": "Альбумин в крови",
     "97830076": "С-реактивный белок (СРБ)",
@@ -383,6 +977,7 @@
     "14767094583": "Определение протромбинового времени",
     "14767110898": "Определение международного нормализованного отношения (МНО)",
     "14767125442": "Исследование уровня фибриногена в крови",
+    "14767132987": "Определение концентрации Д-димера в крови",
     "14767140828": "Активированное частичное тромбопластиновое время"
   },
   "customDrugCatalog": []

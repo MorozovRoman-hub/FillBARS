@@ -115,6 +115,14 @@
             resize: vertical;
         }
 
+        .diagnostic-log {
+            min-height: 340px;
+            white-space: pre;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 11px;
+            line-height: 1.35;
+        }
+
         button {
             width: 100%;
             padding: 10px;
@@ -286,7 +294,7 @@
 
         .editor-tabs {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 6px;
             margin: 10px 0;
         }
@@ -413,17 +421,18 @@
     </div>
 
     <div class="button-stack">
-        <button id="fillForm" type="button">✅ Заполнить форму БАРС</button>
+        <button id="fillForm" type="button">✅ Открыть лабораторию и заполнить</button>
         <button id="openPrintSheet" class="secondary" type="button">🖨 Открыть лист назначений</button>
         <button id="saveJournalEntry" class="secondary" type="button">💾 Сохранить в журнал</button>
         <button id="openJournal" class="ghost" type="button">📚 Журнал назначений</button>
+        <button id="openDiagnostics" class="ghost" type="button">🧭 Диагностика запусков</button>
         <button id="closePopup" class="close-btn" type="button">✖ Закрыть</button>
     </div>
 
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 4.3 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.1.11 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
@@ -440,7 +449,7 @@
             <input id="targetCabinetInput" type="text" placeholder="Например: процедурный кабинет">
             <label class="research-row">
                 <input id="markUrgentCheckbox" type="checkbox">
-                <span>Отмечать «Срочно» при выборе кабинетов</span>
+                <span>Отмечать CITO («Срочно») у выбранных анализов</span>
             </label>
         </div>
 
@@ -454,7 +463,7 @@
             <input id="journalRetentionDays" type="number" min="1" max="365" value="60">
             <button id="clearJournalNow" class="danger settings-button" type="button">Очистить журнал сейчас</button>
             <div class="warning">
-                В журнале сохраняются только техническая запись и назначения. ФИО и дата рождения не сохраняются.
+                В журнале сохраняются № медицинской карты и назначения. ФИО и дата рождения не сохраняются.
             </div>
         </div>
 
@@ -488,6 +497,7 @@
             <div class="editor-tabs">
                 <button class="editor-tab active" data-tab="analyses" type="button">Анализы</button>
                 <button class="editor-tab" data-tab="medications" type="button">Препараты</button>
+                <button class="editor-tab" data-tab="procedures" type="button">Процедуры</button>
             </div>
 
             <div class="editor-tab-panel" data-panel="analyses">
@@ -560,6 +570,22 @@
                 <div id="profileMedicationList" class="scroll-list"></div>
             </div>
 
+            <div class="editor-tab-panel hidden" data-panel="procedures">
+                <input id="procedureId" type="hidden">
+                <label for="procedureName">Диагностическое, режимное или иное назначение</label>
+                <input id="procedureName" type="text" placeholder="ЭГДС, ЭКГ, УЗИ, диета, режим">
+                <label for="procedureComment">Комментарий</label>
+                <input id="procedureComment" type="text" placeholder="Область исследования или дополнительные указания">
+                <div class="button-stack">
+                    <button id="addProcedureToProfile" type="button">Добавить назначение в профиль</button>
+                    <button id="clearProcedureForm" class="ghost" type="button">Очистить поля</button>
+                </div>
+
+                <h4 class="settings-button">Процедуры и режим профиля</h4>
+                <div id="selectedProcedureCounter" class="hint"></div>
+                <div id="profileProcedureList" class="scroll-list"></div>
+            </div>
+
             <div class="button-stack">
                 <button id="saveProfile" type="button">Сохранить назначение</button>
                 <button id="cancelEdit" class="ghost" type="button">Отмена</button>
@@ -573,9 +599,28 @@
             <button id="closeJournal" class="small-btn danger" type="button">Закрыть</button>
         </div>
         <div class="warning">
-            Записи хранятся локально до 60 дней. ФИО и дата рождения в журнал не записываются.
+            Записи хранятся локально до 60 дней. Сохраняются № медицинской карты и назначения; ФИО и дата рождения не записываются.
         </div>
         <div id="journalList" class="section"></div>
+    </div>
+
+    <div id="diagnosticPanel" class="panel hidden">
+        <div class="panel-header">
+            <h3>🧭 Диагностика FillBARS</h3>
+            <button id="closeDiagnostics" class="small-btn danger" type="button">Закрыть</button>
+        </div>
+        <div class="warning">
+            Логи сохраняются только локально и автоматически не отправляются. Они содержат название профиля и технические ID исследований; перед передачей проверьте JSON. FillBARS не добавляет в журнал ФИО, номер карты, дату рождения, адрес и заголовок страницы.
+        </div>
+        <div id="diagnosticSummary" class="hint"></div>
+        <label for="diagnosticRunSelect">Сохранённый запуск</label>
+        <select id="diagnosticRunSelect" aria-label="Сохранённый диагностический запуск"></select>
+        <textarea id="diagnosticLog" class="diagnostic-log" readonly spellcheck="false" aria-label="Выбранный диагностический запуск"></textarea>
+        <div class="button-stack settings-button">
+            <button id="copyDiagnostics" type="button">Копировать выбранный запуск</button>
+            <button id="exportDiagnostics" class="secondary" type="button">Выгрузить JSON</button>
+            <button id="clearDiagnostics" class="danger" type="button">Удалить диагностические логи</button>
+        </div>
     </div>
 
     <script src="popup.js"></script>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FillBARS — DForm namespace fixture</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            margin: 24px;
+            color: #172033;
+            background: #f4f7fb;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 24px;
+        }
+
+        #status {
+            margin-bottom: 18px;
+            font-weight: 700;
+        }
+
+        #fixture-host,
+        #results {
+            padding: 16px;
+            border: 1px solid #c9d3e3;
+            border-radius: 10px;
+            background: white;
+        }
+
+        #results {
+            margin-top: 16px;
+            white-space: pre-wrap;
+        }
+
+        .window,
+        [cmptype="Form"],
+        [name="GridGroups"],
+        [name="GridResearch"],
+        [name="GridDirline"],
+        [name="GridServices"],
+        [name="Grid1"] {
+            display: block;
+            min-width: 240px;
+            min-height: 1px;
+        }
+
+        .window {
+            margin: 10px 0;
+            padding: 8px;
+            border: 1px solid #d9e0eb;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        td {
+            padding: 4px;
+            border: 1px solid #d9e0eb;
+        }
+
+        [cmptype="GridRow"] {
+            cursor: pointer;
+        }
+
+        [cmptype="GridRow"].active {
+            color: #0d62c7;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body data-test-status="running">
+    <h1>FillBARS: реальный DForm engine / namespace</h1>
+    <div id="status">Выполняются проверки…</div>
+    <div id="fixture-host" aria-label="DForm runtime fixture"></div>
+    <pre id="results" aria-live="polite"></pre>
+
+    <script src="../bars-adapter.js"></script>
+    <script src="dform-runtime-fixture.js"></script>
+</body>
+</html>

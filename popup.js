@@ -4,6 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
+const EXTENSION_VERSION = '5.1.11';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -16,6 +17,10 @@ const ACTIVE_PROFILE_NAMES_STORAGE_KEY = 'barsActiveProfileNamesV1';
 const RESEARCH_CATALOG_STORAGE_KEY = 'barsResearchCatalogV3';
 const ASSIGNMENT_SETTINGS_STORAGE_KEY = 'barsAssignmentSettingsV1';
 const CUSTOM_DRUG_CATALOG_STORAGE_KEY = 'barsCustomDrugCatalogV1';
+const DIAGNOSTIC_RUNS_STORAGE_KEY = 'fillbarsDiagnosticRunsV1';
+const DIAGNOSTIC_MESSAGE_NAMESPACE = 'fillbars-diagnostics-v1';
+const MAX_DIAGNOSTIC_RUNS = 12;
+const MAX_DIAGNOSTIC_EVENTS = 220;
 const TEMP_PRINT_PAYLOAD_PREFIX = 'barsPrintPayload:';
 const JOURNAL_DB_NAME = 'FillBARSAssignments';
 const JOURNAL_DB_VERSION = 1;
@@ -62,8 +67,11 @@ let loadedResearches = loadSavedResearches();
 let editingProfileName = null;
 let selectedResearchIds = new Set();
 let selectedMedications = [];
+let selectedProcedures = [];
 let selectedProfileIcon = PROFILE_ICONS[0];
 let activeProfileEditorTab = 'analyses';
+let selectedDiagnosticRunId = '';
+let diagnosticRunsSnapshot = null;
 
 function isPlainObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -125,24 +133,61 @@ function normalizeMedications(rawMedications) {
         .filter(Boolean);
 }
 
+function normalizeProcedure(rawProcedure) {
+    if (typeof rawProcedure === 'string') {
+        const name = rawProcedure.trim();
+        return name ? {
+            id: `procedure-${name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-|-$/g, '')}`,
+            name,
+            comment: ''
+        } : null;
+    }
+
+    if (!isPlainObject(rawProcedure)) {
+        return null;
+    }
+
+    const name = String(rawProcedure.name || '').trim();
+    if (!name) {
+        return null;
+    }
+
+    return {
+        id: String(rawProcedure.id || `procedure-${name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-|-$/g, '')}`),
+        name,
+        comment: String(rawProcedure.comment || '').trim()
+    };
+}
+
+function normalizeProcedures(rawProcedures) {
+    if (!Array.isArray(rawProcedures)) {
+        return [];
+    }
+
+    return rawProcedures.map(normalizeProcedure).filter(Boolean);
+}
+
 function normalizeProfile(rawProfile) {
     if (!isPlainObject(rawProfile)) {
         return {
             analyses: {},
-            medications: []
+            medications: [],
+            procedures: []
         };
     }
 
-    if (isPlainObject(rawProfile.analyses) || Array.isArray(rawProfile.medications)) {
+    if (isPlainObject(rawProfile.analyses) || Array.isArray(rawProfile.medications) || Array.isArray(rawProfile.procedures)) {
         return {
             analyses: normalizeAnalyses(rawProfile.analyses),
-            medications: normalizeMedications(rawProfile.medications)
+            medications: normalizeMedications(rawProfile.medications),
+            procedures: normalizeProcedures(rawProfile.procedures)
         };
     }
 
     return {
         analyses: normalizeAnalyses(rawProfile),
-        medications: []
+        medications: [],
+        procedures: []
     };
 }
 
@@ -233,7 +278,10 @@ function normalizeDrugCatalog(rawCatalog) {
 
 async function loadDrugCatalogFile() {
     try {
-        const response = await fetch(chrome.runtime.getURL(DRUG_CATALOG_FILE_NAME), { cache: 'no-store' });
+        const url = globalThis.chrome?.runtime?.getURL
+            ? chrome.runtime.getURL(DRUG_CATALOG_FILE_NAME)
+            : DRUG_CATALOG_FILE_NAME;
+        const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) {
             return [];
         }
@@ -247,7 +295,10 @@ async function loadDrugCatalogFile() {
 
 async function loadExtensionConfigFile() {
     try {
-        const response = await fetch(chrome.runtime.getURL(CONFIG_FILE_NAME), { cache: 'no-store' });
+        const url = globalThis.chrome?.runtime?.getURL
+            ? chrome.runtime.getURL(CONFIG_FILE_NAME)
+            : CONFIG_FILE_NAME;
+        const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) {
             return {};
         }
@@ -283,6 +334,327 @@ function writeJsonStorage(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
 }
 
+function classifyExtensionError(errorMessage) {
+    const normalized = String(errorMessage || '').toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    if (normalized.includes('cannot access') || normalized.includes('не удается получить доступ')) {
+        return 'tab_access_denied';
+    }
+    if (normalized.includes('frame') && (normalized.includes('removed') || normalized.includes('not found'))) {
+        return 'frame_unavailable';
+    }
+    if (normalized.includes('message port closed') || normalized.includes('receiving end does not exist')) {
+        return 'extension_context_closed';
+    }
+    if (normalized.includes('cannot be scripted') || normalized.includes('chrome://')) {
+        return 'restricted_page';
+    }
+    return 'extension_api_error';
+}
+
+function sendDiagnosticWorkerMessage(action, payload = {}) {
+    if (!globalThis.chrome?.runtime?.sendMessage) {
+        return Promise.resolve(null);
+    }
+
+    return new Promise((resolve) => {
+        try {
+            chrome.runtime.sendMessage({
+                namespace: DIAGNOSTIC_MESSAGE_NAMESPACE,
+                action,
+                ...payload
+            }, (response) => {
+                // Reading lastError suppresses the expected warning when an old,
+                // not-yet-reloaded extension has no diagnostic worker.
+                const runtimeError = chrome.runtime.lastError;
+                resolve(runtimeError ? null : response || null);
+            });
+        } catch (error) {
+            resolve(null);
+        }
+    });
+}
+
+function sanitizeDiagnosticValue(value, key = '', seen = new WeakSet(), depth = 0) {
+    const blockedKeys = /^(error|location|title|url|href|patient|persmedcard|medicalcardnumber|fullname|birthdate|fio|text|innertext|textcontent|label)$/i;
+    if (blockedKeys.test(key)) {
+        return undefined;
+    }
+
+    if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        return value
+            .replace(/(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s"'<>]+/gi, '[адрес удалён]')
+            .slice(0, 1600);
+    }
+
+    if (typeof value !== 'object') {
+        return String(value).slice(0, 500);
+    }
+
+    if (depth >= 7) {
+        return '[глубина ограничена]';
+    }
+    if (seen.has(value)) {
+        return '[циклическая ссылка]';
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+        return value.slice(0, 100)
+            .map((entry) => sanitizeDiagnosticValue(entry, key, seen, depth + 1))
+            .filter((entry) => entry !== undefined);
+    }
+
+    return Object.fromEntries(
+        Object.entries(value)
+            .slice(0, 80)
+            .map(([entryKey, entryValue]) => [
+                entryKey,
+                sanitizeDiagnosticValue(entryValue, entryKey, seen, depth + 1)
+            ])
+            .filter(([, entryValue]) => entryValue !== undefined)
+    );
+}
+
+function getDiagnosticRuns() {
+    if (Array.isArray(diagnosticRunsSnapshot)) {
+        return diagnosticRunsSnapshot.slice();
+    }
+
+    const stored = readJsonStorage(DIAGNOSTIC_RUNS_STORAGE_KEY, []);
+    return Array.isArray(stored)
+        ? stored.filter((run) => run && typeof run === 'object')
+            .sort((left, right) => String(right.startedAt || '').localeCompare(String(left.startedAt || '')))
+        : [];
+}
+
+function upsertDiagnosticRun(run) {
+    let sanitizedRun;
+    try {
+        sanitizedRun = sanitizeDiagnosticValue(run);
+    } catch (error) {
+        console.warn('[FillBARS] Диагностическое событие пропущено: не удалось безопасно подготовить данные.', error);
+        return null;
+    }
+    if (!sanitizedRun?.id) {
+        return null;
+    }
+
+    const runs = getDiagnosticRuns().filter((entry) => entry.id !== sanitizedRun.id);
+    const nextRuns = [sanitizedRun, ...runs]
+        .sort((left, right) => String(right.startedAt || '').localeCompare(String(left.startedAt || '')))
+        .slice(0, MAX_DIAGNOSTIC_RUNS);
+    diagnosticRunsSnapshot = nextRuns;
+
+    try {
+        writeJsonStorage(DIAGNOSTIC_RUNS_STORAGE_KEY, nextRuns);
+    } catch (error) {
+        console.warn('[FillBARS] Не удалось сохранить полный диагностический журнал, сокращаю историю.', error);
+        try {
+            writeJsonStorage(DIAGNOSTIC_RUNS_STORAGE_KEY, nextRuns.slice(0, 3));
+        } catch (fallbackError) {
+            console.error('[FillBARS] Локальное хранилище диагностических логов недоступно.', fallbackError);
+        }
+    }
+
+    void sendDiagnosticWorkerMessage('upsert', { run: sanitizedRun });
+
+    return sanitizedRun;
+}
+
+function createDiagnosticRun(profileName, assignmentSettings) {
+    const startedAt = new Date().toISOString();
+    const run = {
+        schemaVersion: 1,
+        id: generateId('diagnostic'),
+        extensionVersion: EXTENSION_VERSION,
+        startedAt,
+        completedAt: null,
+        durationMs: null,
+        status: 'running',
+        profileName,
+        assignmentStage: assignmentSettings?.assignmentStage || ASSIGNMENT_STAGE_ANALYSES,
+        events: [{ time: startedAt, event: 'popup:run_started', details: {} }]
+    };
+    upsertDiagnosticRun(run);
+    return run;
+}
+
+function appendDiagnosticRunEvent(run, event, details = {}) {
+    if (!run) {
+        return;
+    }
+
+    try {
+        run.events = Array.isArray(run.events) ? run.events : [];
+        run.events.push({
+            time: new Date().toISOString(),
+            event,
+            details: sanitizeDiagnosticValue(details)
+        });
+        run.events = run.events.slice(-MAX_DIAGNOSTIC_EVENTS);
+        upsertDiagnosticRun(run);
+    } catch (error) {
+        console.warn('[FillBARS] Не удалось добавить диагностическое событие.', error);
+    }
+}
+
+function completeDiagnosticRun(run, status, summary = {}, pageEvents = []) {
+    if (!run) {
+        return;
+    }
+
+    try {
+        const completedAt = new Date().toISOString();
+        const safePageEvents = Array.isArray(pageEvents)
+            ? pageEvents.map((entry) => sanitizeDiagnosticValue(entry)).filter(Boolean)
+            : [];
+        run.events = [...(run.events || []), ...safePageEvents, {
+            time: completedAt,
+            event: 'popup:run_finished',
+            details: { status }
+        }]
+            .sort((left, right) => String(left.time || '').localeCompare(String(right.time || '')))
+            .slice(-MAX_DIAGNOSTIC_EVENTS);
+        run.status = status;
+        run.completedAt = completedAt;
+        run.durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(run.startedAt));
+        run.summary = sanitizeDiagnosticValue(summary);
+        upsertDiagnosticRun(run);
+    } catch (error) {
+        console.warn('[FillBARS] Не удалось завершить диагностический журнал.', error);
+    }
+
+    if (!document.getElementById('diagnosticPanel')?.classList.contains('hidden')) {
+        renderDiagnosticPanel();
+    }
+}
+
+function getSelectedDiagnosticRun(runs = getDiagnosticRuns()) {
+    return runs.find((run) => run.id === selectedDiagnosticRunId) || runs[0] || null;
+}
+
+async function refreshDiagnosticRunsFromWorker() {
+    const response = await sendDiagnosticWorkerMessage('get_runs');
+    if (!response?.ok || !Array.isArray(response.runs)) {
+        return getDiagnosticRuns();
+    }
+
+    const runs = response.runs.slice(0, MAX_DIAGNOSTIC_RUNS);
+    diagnosticRunsSnapshot = runs;
+    try {
+        writeJsonStorage(DIAGNOSTIC_RUNS_STORAGE_KEY, runs);
+    } catch (error) {
+        console.warn('[FillBARS] Не удалось обновить локальную копию диагностических логов.', error);
+    }
+    return runs;
+}
+
+function renderDiagnosticPanelContents() {
+    const panel = document.getElementById('diagnosticPanel');
+    const summary = document.getElementById('diagnosticSummary');
+    const output = document.getElementById('diagnosticLog');
+    const selector = document.getElementById('diagnosticRunSelect');
+    if (!panel || !summary || !output || !selector) {
+        return;
+    }
+
+    const runs = getDiagnosticRuns();
+    const selected = getSelectedDiagnosticRun(runs);
+    selectedDiagnosticRunId = selected?.id || '';
+    selector.textContent = '';
+    for (const run of runs) {
+        const option = document.createElement('option');
+        option.value = run.id;
+        option.textContent = `${run.startedAt || 'без времени'} — ${run.status || 'unknown'} — ${run.profileName || 'без профиля'}`;
+        selector.appendChild(option);
+    }
+    selector.disabled = runs.length === 0;
+    selector.value = selectedDiagnosticRunId;
+    summary.textContent = selected
+        ? `Сохранено запусков: ${runs.length}. Выбран: ${selected.status}, ${selected.startedAt}.`
+        : 'Диагностических запусков пока нет.';
+    output.value = selected ? JSON.stringify(selected, null, 2) : '';
+    panel.classList.remove('hidden');
+}
+
+async function renderDiagnosticPanel() {
+    renderDiagnosticPanelContents();
+    await refreshDiagnosticRunsFromWorker();
+    renderDiagnosticPanelContents();
+}
+
+function closeDiagnosticPanel() {
+    document.getElementById('diagnosticPanel')?.classList.add('hidden');
+}
+
+async function copyLatestDiagnosticLog() {
+    await refreshDiagnosticRunsFromWorker();
+    renderDiagnosticPanelContents();
+    const selected = getSelectedDiagnosticRun();
+    const text = selected ? JSON.stringify(selected, null, 2) : '';
+    if (!text) {
+        setStatus('❌ Диагностический журнал пока пуст', '#f44336');
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (error) {
+        const output = document.getElementById('diagnosticLog');
+        output?.focus();
+        output?.select();
+        if (!document.execCommand('copy')) {
+            throw error;
+        }
+    }
+    setStatus('✅ Выбранный диагностический запуск скопирован');
+}
+
+async function exportLatestDiagnosticLog() {
+    await refreshDiagnosticRunsFromWorker();
+    renderDiagnosticPanelContents();
+    const selected = getSelectedDiagnosticRun();
+    if (!selected) {
+        setStatus('❌ Диагностический журнал пока пуст', '#f44336');
+        return;
+    }
+
+    const blob = new Blob([JSON.stringify(selected, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = String(selected.startedAt || new Date().toISOString()).replace(/[:.]/g, '-');
+    link.href = url;
+    link.download = `fillbars-diagnostic-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus('✅ Диагностический JSON подготовлен');
+}
+
+async function clearDiagnosticRuns() {
+    if (!confirm('Удалить все локальные диагностические логи FillBARS?')) {
+        return;
+    }
+    await sendDiagnosticWorkerMessage('clear');
+    diagnosticRunsSnapshot = [];
+    try {
+        localStorage.removeItem(DIAGNOSTIC_RUNS_STORAGE_KEY);
+    } catch (error) {
+        console.warn('[FillBARS] Не удалось очистить резервную копию диагностических логов.', error);
+    }
+    selectedDiagnosticRunId = '';
+    renderDiagnosticPanelContents();
+    setStatus('✅ Диагностические логи удалены');
+}
+
 function getCustomProfiles() {
     return normalizeProfiles(readJsonStorage(PROFILE_STORAGE_KEY, {}));
 }
@@ -304,6 +676,10 @@ function getProfileAnalyses(profile) {
 
 function getProfileMedications(profile) {
     return normalizeProfile(profile).medications;
+}
+
+function getProfileProcedures(profile) {
+    return normalizeProfile(profile).procedures;
 }
 
 function getActiveProfileNames() {
@@ -463,8 +839,8 @@ function updateAssignmentStageUi(settings = getAssignmentSettings()) {
     slider.disabled = !canUseSchedule;
     slider.value = normalizedSettings.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE ? '1' : '0';
     label.textContent = canUseSchedule && normalizedSettings.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE
-        ? (normalizedSettings.markUrgent ? 'Кабинеты и срочно' : 'Кабинеты')
-        : 'Только анализы';
+        ? (normalizedSettings.markUrgent ? 'Кабинеты и CITO' : 'Кабинеты')
+        : (normalizedSettings.markUrgent ? 'Только анализы и CITO' : 'Только анализы');
 
     if (targetCabinetInput) {
         targetCabinetInput.value = normalizedSettings.targetCabinet;
@@ -485,7 +861,7 @@ function updateAssignmentStageUi(settings = getAssignmentSettings()) {
     if (hint) {
         hint.textContent = canUseSchedule
             ? ''
-            : 'Укажите кабинет, чтобы включить этап кабинетов.';
+            : 'CITO применяется к выбранным анализам; укажите кабинет, чтобы дополнительно включить расписание.';
     }
 }
 
@@ -582,7 +958,7 @@ function renderProfileManagerList() {
 
         const name = document.createElement('span');
         name.className = 'profile-row-name';
-        name.textContent = `${profileName} (${Object.keys(profile.analyses).length} ан., ${profile.medications.length} преп.)`;
+        name.textContent = `${profileName} (${Object.keys(profile.analyses).length} ан., ${profile.medications.length} преп., ${profile.procedures.length} проц.)`;
 
         const editButton = document.createElement('button');
         editButton.type = 'button';
@@ -955,6 +1331,7 @@ function buildAssignmentPayload(profileName, options = {}) {
         profileName,
         patient: options.patient || getPatientPrintFields(),
         medications: getProfileMedications(profile),
+        procedures: getProfileProcedures(profile),
         analyses: getAnalysesForPrint(profile)
     };
 }
@@ -1020,18 +1397,37 @@ async function saveSelectedProfileToJournal() {
         return;
     }
 
-    const entry = {
-        id: generateId('journal'),
-        createdAt: new Date().toISOString(),
-        medicalCardNumber: '',
-        profileName,
-        medications: payload.medications,
-        analyses: payload.analyses
-    };
+    const button = document.getElementById('saveJournalEntry');
+    button.disabled = true;
+    setStatus('⏳ Получаю номер медицинской карты из БАРС...', '#ff9800');
 
-    await addJournalEntry(entry);
-    renderJournalPanel();
-    setStatus('✅ Запись сохранена в локальный журнал');
+    try {
+        const patientData = await getPatientDataFromActiveBarsPage();
+        const medicalCardNumber = String(patientData.medicalCardNumber || '').trim();
+        if (!/^\d{6,}$/.test(medicalCardNumber)) {
+            setStatus('❌ Номер медицинской карты не найден. Запись в журнал не сохранена', '#f44336');
+            return;
+        }
+
+        const entry = {
+            id: generateId('journal'),
+            createdAt: new Date().toISOString(),
+            medicalCardNumber,
+            profileName,
+            medications: payload.medications,
+            procedures: payload.procedures,
+            analyses: payload.analyses
+        };
+
+        await addJournalEntry(entry);
+        await renderJournalPanel();
+        setStatus(`✅ Запись для карты № ${medicalCardNumber} сохранена в журнал`);
+    } catch (error) {
+        console.error('Не удалось получить номер медицинской карты из БАРС', error);
+        setStatus(`❌ Не удалось сохранить запись: ${error.message}`, '#f44336');
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function buildPayloadFromJournalEntry(entry) {
@@ -1045,6 +1441,7 @@ function buildPayloadFromJournalEntry(entry) {
             appointmentDate: new Date(entry.createdAt || Date.now()).toISOString().slice(0, 10)
         },
         medications: normalizeMedications(entry.medications),
+        procedures: normalizeProcedures(entry.procedures),
         analyses: Array.isArray(entry.analyses) ? entry.analyses : []
     };
 }
@@ -1335,7 +1732,9 @@ function readPatientDataFromBarsPage() {
 }
 
 function switchProfileEditorTab(tabName) {
-    activeProfileEditorTab = tabName === 'medications' ? 'medications' : 'analyses';
+    activeProfileEditorTab = ['analyses', 'medications', 'procedures'].includes(tabName)
+        ? tabName
+        : 'analyses';
 
     document.querySelectorAll('.editor-tab').forEach((button) => {
         button.classList.toggle('active', button.dataset.tab === activeProfileEditorTab);
@@ -1555,6 +1954,118 @@ function renderSelectedMedications() {
     });
 }
 
+function procedureToText(procedure) {
+    return [procedure?.name, procedure?.comment]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join(' — ');
+}
+
+function clearProcedureForm() {
+    document.getElementById('procedureId').value = '';
+    document.getElementById('procedureName').value = '';
+    document.getElementById('procedureComment').value = '';
+    document.getElementById('addProcedureToProfile').textContent = 'Добавить назначение в профиль';
+}
+
+function renderSelectedProcedures() {
+    const list = document.getElementById('profileProcedureList');
+    const counter = document.getElementById('selectedProcedureCounter');
+    if (!list || !counter) {
+        return;
+    }
+
+    list.textContent = '';
+    counter.textContent = `Выбрано: ${selectedProcedures.length}`;
+
+    if (selectedProcedures.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Диагностические и режимные назначения пока не добавлены';
+        list.appendChild(empty);
+        return;
+    }
+
+    selectedProcedures.forEach((procedure, index) => {
+        const row = document.createElement('div');
+        row.className = 'medication-row';
+
+        const text = document.createElement('div');
+        text.className = 'medication-row-text';
+        text.textContent = procedureToText(procedure);
+
+        const controls = document.createElement('div');
+        controls.className = 'medication-row-actions';
+
+        const upButton = document.createElement('button');
+        upButton.type = 'button';
+        upButton.className = 'small-btn';
+        upButton.textContent = '↑';
+        upButton.disabled = index === 0;
+        upButton.addEventListener('click', () => {
+            [selectedProcedures[index - 1], selectedProcedures[index]] = [selectedProcedures[index], selectedProcedures[index - 1]];
+            renderSelectedProcedures();
+        });
+
+        const downButton = document.createElement('button');
+        downButton.type = 'button';
+        downButton.className = 'small-btn';
+        downButton.textContent = '↓';
+        downButton.disabled = index === selectedProcedures.length - 1;
+        downButton.addEventListener('click', () => {
+            [selectedProcedures[index + 1], selectedProcedures[index]] = [selectedProcedures[index], selectedProcedures[index + 1]];
+            renderSelectedProcedures();
+        });
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'small-btn';
+        editButton.textContent = 'Ред.';
+        editButton.addEventListener('click', () => {
+            document.getElementById('procedureId').value = procedure.id;
+            document.getElementById('procedureName').value = procedure.name;
+            document.getElementById('procedureComment').value = procedure.comment;
+            document.getElementById('addProcedureToProfile').textContent = 'Обновить назначение';
+        });
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'small-btn danger-mini';
+        deleteButton.textContent = 'Удалить';
+        deleteButton.addEventListener('click', () => {
+            selectedProcedures.splice(index, 1);
+            renderSelectedProcedures();
+        });
+
+        controls.append(upButton, downButton, editButton, deleteButton);
+        row.append(text, controls);
+        list.appendChild(row);
+    });
+}
+
+function addProcedureFromEditor() {
+    const procedure = normalizeProcedure({
+        id: document.getElementById('procedureId').value || generateId('procedure'),
+        name: document.getElementById('procedureName').value,
+        comment: document.getElementById('procedureComment').value
+    });
+
+    if (!procedure) {
+        setStatus('❌ Укажите название диагностического или режимного назначения', '#f44336');
+        return;
+    }
+
+    const existingIndex = selectedProcedures.findIndex((item) => item.id === procedure.id);
+    if (existingIndex >= 0) {
+        selectedProcedures[existingIndex] = procedure;
+    } else {
+        selectedProcedures.push(procedure);
+    }
+
+    renderSelectedProcedures();
+    clearProcedureForm();
+}
+
 function addMedicationFromEditor() {
     const rawMedication = getMedicationFormValues();
     if (!rawMedication.id) {
@@ -1640,6 +2151,7 @@ async function openProfileEditor(profileName = null) {
         selectedProfileIcon = profileTitle.icon;
         selectedResearchIds = new Set(Object.keys(profile.analyses));
         selectedMedications = [...profile.medications];
+        selectedProcedures = [...profile.procedures];
         nameInput.value = profileTitle.name;
         title.textContent = 'Редактирование профиля';
         saveButton.textContent = 'Сохранить назначение';
@@ -1647,6 +2159,7 @@ async function openProfileEditor(profileName = null) {
         selectedProfileIcon = PROFILE_ICONS[0];
         selectedResearchIds = new Set();
         selectedMedications = [];
+        selectedProcedures = [];
         nameInput.value = '';
         title.textContent = 'Новое назначение';
         saveButton.textContent = 'Добавить назначение';
@@ -1655,12 +2168,14 @@ async function openProfileEditor(profileName = null) {
     document.getElementById('researchSearch').value = '';
     document.getElementById('drugSearch').value = '';
     clearMedicationForm();
+    clearProcedureForm();
     editor.classList.remove('hidden');
     switchProfileEditorTab('analyses');
     renderIconPicker();
     renderResearchList();
     renderDrugCatalogSearch();
     renderSelectedMedications();
+    renderSelectedProcedures();
 
     await loadResearchesForEditor();
 }
@@ -1669,6 +2184,7 @@ function closeProfileEditor() {
     editingProfileName = null;
     selectedResearchIds = new Set();
     selectedMedications = [];
+    selectedProcedures = [];
     document.getElementById('profileEditor').classList.add('hidden');
 }
 
@@ -1681,8 +2197,8 @@ function saveProfileFromEditor() {
         return;
     }
 
-    if (selectedResearchIds.size === 0 && selectedMedications.length === 0) {
-        setStatus('❌ Выберите хотя бы одно исследование или препарат', '#f44336');
+    if (selectedResearchIds.size === 0 && selectedMedications.length === 0 && selectedProcedures.length === 0) {
+        setStatus('❌ Добавьте хотя бы одно исследование, препарат или процедуру', '#f44336');
         return;
     }
 
@@ -1709,7 +2225,8 @@ function saveProfileFromEditor() {
 
     customProfiles[newTitle] = {
         analyses,
-        medications: normalizeMedications(selectedMedications)
+        medications: normalizeMedications(selectedMedications),
+        procedures: normalizeProcedures(selectedProcedures)
     };
     activeProfileNames.add(newTitle);
     saveCustomProfiles(customProfiles);
@@ -1867,7 +2384,8 @@ async function readResearchesFromPage() {
     const TARGET_PAGE_SIZE = 150;
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR));
+    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR))
+        .filter((checkbox) => checkbox.getAttribute('item_value'));
     const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
     const normalizeLabel = (value) => normalizeText(value).toLowerCase();
 
@@ -1955,21 +2473,6 @@ async function readResearchesFromPage() {
         const inRightPart = rect.left >= window.innerWidth * 0.3;
 
         return inBottomPart && inRightPart;
-    };
-
-    const waitForRowsReload = async (previousCount) => {
-        const startedAt = Date.now();
-
-        while (Date.now() - startedAt < 7000) {
-            await sleep(250);
-
-            const currentCount = getCheckboxes().length;
-            if (currentCount >= 100 || currentCount > previousCount) {
-                return currentCount;
-            }
-        }
-
-        return getCheckboxes().length;
     };
 
     const waitForCheckboxesToSettle = async () => {
@@ -2270,6 +2773,27 @@ function saveScenarioSettingsFromUi() {
 
 // Заполняем выпадающий список профилями
 document.addEventListener('DOMContentLoaded', async () => {
+    const loadedManifestVersion = globalThis.chrome?.runtime?.getManifest?.().version || '';
+    const versionMismatch = !!loadedManifestVersion && loadedManifestVersion !== EXTENSION_VERSION;
+    const versionElement = document.querySelector('.version');
+    if (versionElement) {
+        versionElement.textContent = versionMismatch
+            ? `Сборка ${EXTENSION_VERSION}; браузер загрузил ${loadedManifestVersion} — перезагрузите расширение`
+            : `Версия ${EXTENSION_VERSION} | Для медицинских информационных систем`;
+        versionElement.style.color = versionMismatch ? '#d32f2f' : '';
+    }
+    if (versionMismatch) {
+        const fillButton = document.getElementById('fillForm');
+        const statusDiv = document.getElementById('status');
+        if (fillButton) {
+            fillButton.disabled = true;
+        }
+        if (statusDiv) {
+            statusDiv.textContent = `❌ Загружена смешанная версия: сборка ${EXTENSION_VERSION}, манифест ${loadedManifestVersion}. Перезагрузите расширение в Яндекс Браузере.`;
+            statusDiv.style.color = '#f44336';
+        }
+    }
+
     applyExtensionConfig(await loadExtensionConfigFile());
     CONFIG_DRUG_CATALOG = normalizeDrugCatalog([
         ...CONFIG_DRUG_CATALOG,
@@ -2297,6 +2821,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('addMedicationToProfile').addEventListener('click', addMedicationFromEditor);
     document.getElementById('clearMedicationForm').addEventListener('click', clearMedicationForm);
     document.getElementById('saveManualDrug').addEventListener('click', saveManualDrugToCatalog);
+    document.getElementById('addProcedureToProfile').addEventListener('click', addProcedureFromEditor);
+    document.getElementById('clearProcedureForm').addEventListener('click', clearProcedureForm);
     document.getElementById('assignmentStageSlider').addEventListener('input', saveScenarioSettingsFromUi);
     document.getElementById('targetCabinetInput').addEventListener('input', saveScenarioSettingsFromUi);
     document.getElementById('markUrgentCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
@@ -2316,6 +2842,35 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
     document.getElementById('closeJournal').addEventListener('click', closeJournalPanel);
+    document.getElementById('openDiagnostics').addEventListener('click', () => {
+        renderDiagnosticPanel().catch((error) => {
+            console.error('Не удалось открыть диагностический журнал', error);
+            setStatus('❌ Не удалось открыть диагностический журнал', '#f44336');
+        });
+    });
+    document.getElementById('closeDiagnostics').addEventListener('click', closeDiagnosticPanel);
+    document.getElementById('diagnosticRunSelect').addEventListener('change', (event) => {
+        selectedDiagnosticRunId = event.target.value;
+        renderDiagnosticPanelContents();
+    });
+    document.getElementById('copyDiagnostics').addEventListener('click', () => {
+        copyLatestDiagnosticLog().catch((error) => {
+            console.error('Не удалось скопировать диагностический журнал', error);
+            setStatus('❌ Не удалось скопировать диагностический журнал', '#f44336');
+        });
+    });
+    document.getElementById('exportDiagnostics').addEventListener('click', () => {
+        exportLatestDiagnosticLog().catch((error) => {
+            console.error('Не удалось выгрузить диагностический журнал', error);
+            setStatus('❌ Не удалось выгрузить диагностический журнал', '#f44336');
+        });
+    });
+    document.getElementById('clearDiagnostics').addEventListener('click', () => {
+        clearDiagnosticRuns().catch((error) => {
+            console.error('Не удалось удалить диагностические логи', error);
+            setStatus('❌ Не удалось удалить диагностические логи', '#f44336');
+        });
+    });
     document.getElementById('clearJournalNow').addEventListener('click', async () => {
         if (!confirm('Очистить локальный журнал назначений сейчас?')) {
             return;
@@ -2331,6 +2886,386 @@ document.addEventListener('DOMContentLoaded', async () => {
         event.target.value = '';
     });
 });
+
+function inspectBarsFrame() {
+    const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const isVisible = (element) => {
+        if (!element || !element.isConnected) {
+            return false;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0
+            && rect.height > 0
+            && style.display !== 'none'
+            && style.visibility !== 'hidden';
+    };
+    const getVisibleElements = (selector) => Array.from(document.querySelectorAll(selector)).filter(isVisible);
+    const contexts = [window];
+
+    try {
+        contexts.push(window.parent, window.top);
+    } catch (error) {
+        // A cross-origin parent cannot contribute to the BARS context.
+    }
+
+    const patientVariableNames = ['PERSMEDCARD', 'PATIENT_ID', 'PATIENT'];
+    const hasPatientContext = contexts
+        .filter((context, index, list) => context && list.indexOf(context) === index)
+        .some((context) => {
+            try {
+                if (typeof context.getVar !== 'function') {
+                    return false;
+                }
+
+                return patientVariableNames.flatMap((name) => [context.getVar(name, 1), context.getVar(name)])
+                    .some((value) => value !== undefined && value !== null && String(value).trim() !== '');
+            } catch (error) {
+                return false;
+            }
+        });
+    const orderShells = getVisibleElements('.dirline_order_alt');
+    const orderForms = orderShells.filter((form) => form.querySelector('[name="GridGroups"]')
+        && form.querySelector('[name="GridResearch"]')
+        && form.querySelector('[name="GridDirline"]'));
+    const researchGrids = orderForms
+        .map((form) => form.querySelector('[name="GridResearch"]'))
+        .filter(Boolean);
+    const checkboxCount = researchGrids.reduce((count, grid) => count
+        + Array.from(grid.querySelectorAll('input[name="GridResearch_SelectList_Item"]'))
+            .filter((checkbox) => checkbox.getAttribute('item_value')
+                || (checkbox.value && checkbox.value !== 'on')).length, 0);
+    const hasOrderForm = orderForms.length > 0;
+    const hasOpenLabButton = getVisibleElements([
+        '[name="byNaprAnalyseLab"]',
+        '[name="linkDirLineOrder"]',
+        '[onclick*=".openDirLineOrder"]'
+    ].join(', ')).length > 0;
+    const hasLabHistoryLink = getVisibleElements('span, a, td, div')
+        .some((element) => normalizeText(element.textContent).includes('лабораторные исследования')
+            && normalizeText(element.getAttribute('onclick')).includes('openonlinkwindow'));
+    const hasBarsApi = contexts.some((context) => {
+        try {
+            return typeof context?.openD3Form === 'function';
+        } catch (error) {
+            return false;
+        }
+    });
+    const score = (hasOrderForm ? 10000 : 0)
+        + (researchGrids.length > 0 ? 6000 : 0)
+        + Math.min(checkboxCount, 500)
+        + (hasPatientContext && hasOpenLabButton ? 2000 : 0)
+        + (hasPatientContext && hasLabHistoryLink ? 1200 : 0)
+        + (hasPatientContext && hasBarsApi ? 500 : 0);
+
+    return {
+        score,
+        hasOrderForm,
+        hasOrderShell: orderShells.length > 0,
+        researchGridCount: researchGrids.length,
+        checkboxCount,
+        hasPatientContext,
+        hasOpenLabButton,
+        hasLabHistoryLink,
+        hasBarsApi
+    };
+}
+
+function selectBarsFrame(results) {
+    const candidates = (results || [])
+        .map((entry) => ({ frameId: entry.frameId, ...entry.result }))
+        .filter((frame) => Number.isInteger(frame.frameId)
+            && frame.score > 0
+            && (frame.hasOrderForm
+                || frame.researchGridCount > 0
+                || frame.hasOpenLabButton
+                || frame.hasLabHistoryLink))
+        .sort((left, right) => right.score - left.score || right.checkboxCount - left.checkboxCount);
+    if (candidates.length > 0) {
+        return candidates[0];
+    }
+
+    // API fallback is safe only when exactly one frame owns both the patient
+    // context and the BARS form API. Never start a mutating runner in all frames.
+    const apiCandidates = (results || [])
+        .map((entry) => ({ frameId: entry.frameId, ...entry.result }))
+        .filter((frame) => Number.isInteger(frame.frameId)
+            && frame.hasPatientContext
+            && frame.hasBarsApi);
+    return apiCandidates.length === 1 ? apiCandidates[0] : null;
+}
+
+function invokeFillBARSRunner(formData, profileName, assignmentSettings, diagnosticRunId, diagnosticBridgeToken) {
+    const runner = globalThis.__FillBARS_RUNNER__;
+    if (!runner || typeof runner.run !== 'function') {
+        return {
+            message: 'Движок FillBARS не загружен',
+            filledCount: 0,
+            totalFound: 0,
+            fatalError: true,
+            runnerMissing: true
+        };
+    }
+
+    const lockSlot = '__FillBARS_ACTIVE_RUN_V1__';
+    const activeRun = globalThis[lockSlot];
+    if (activeRun?.promise) {
+        return {
+            message: 'В этой форме уже выполняется другой запуск FillBARS',
+            filledCount: 0,
+            totalFound: 0,
+            blocked: true,
+            runnerBusy: true,
+            activeRunId: activeRun.runId || ''
+        };
+    }
+
+    const promise = Promise.resolve().then(() => runner.run(
+        formData,
+        profileName,
+        assignmentSettings,
+        diagnosticRunId,
+        diagnosticBridgeToken
+    ));
+    globalThis[lockSlot] = { runId: diagnosticRunId, promise };
+    return promise.finally(() => {
+        if (globalThis[lockSlot]?.promise === promise) {
+            delete globalThis[lockSlot];
+        }
+    });
+}
+
+function installDiagnosticBridge(diagnosticRunId, bridgeToken, extensionVersion, continuationContext = {}) {
+    const namespace = 'fillbars-diagnostics-v1';
+    // A bridge is scoped to its random token. A second popup run must not
+    // detach diagnostics from an earlier runner that is still finishing.
+    const bridgeSlot = `__fillbarsDiagnosticBridgeV1_${bridgeToken}`;
+    const previousBridge = window[bridgeSlot];
+    if (previousBridge && typeof previousBridge.dispose === 'function') {
+        previousBridge.dispose();
+    }
+
+    const forward = (payload) => {
+        try {
+            chrome.runtime.sendMessage({
+                namespace,
+                ...payload,
+                runId: diagnosticRunId,
+                extensionVersion
+            }, () => {
+                // The popup may close while the page keeps running. Reading
+                // lastError prevents a harmless console warning in that case.
+                void chrome.runtime.lastError;
+            });
+        } catch (error) {
+            // Diagnostics must never interrupt the BARS workflow.
+        }
+    };
+
+    let scheduleObserver = null;
+    let schedulePollTimer = null;
+    let scheduleTimeoutTimer = null;
+    let scheduleWatchdogTimer = null;
+    let scheduleMonitorStarted = false;
+    let scheduleDetected = false;
+    let resumeRequestInFlight = false;
+    let pageCompleted = false;
+    let lastResumeReason = '';
+
+    const stopScheduleMonitor = () => {
+        if (scheduleObserver) {
+            scheduleObserver.disconnect();
+            scheduleObserver = null;
+        }
+        clearInterval(schedulePollTimer);
+        clearTimeout(scheduleTimeoutTimer);
+        schedulePollTimer = null;
+        scheduleTimeoutTimer = null;
+    };
+
+    const getVisibleScheduleForms = () => {
+        return Array.from(document.querySelectorAll('.form-schedule'))
+            .filter((form) => {
+                if (!form.isConnected) {
+                    return false;
+                }
+                const rect = form.getBoundingClientRect();
+                const style = window.getComputedStyle(form);
+                return rect.width > 0
+                    && rect.height > 0
+                    && style.display !== 'none'
+                    && style.visibility !== 'hidden';
+            });
+    };
+
+    const requestScheduleResume = (trigger) => {
+        if (pageCompleted || resumeRequestInFlight || getVisibleScheduleForms().length === 0) {
+            return;
+        }
+        resumeRequestInFlight = true;
+
+        try {
+            chrome.runtime.sendMessage({
+                namespace,
+                action: 'resume_schedule',
+                runId: diagnosticRunId,
+                token: bridgeToken,
+                extensionVersion,
+                continuation: continuationContext
+            }, (response) => {
+                const runtimeError = chrome.runtime.lastError;
+                resumeRequestInFlight = false;
+                if (pageCompleted) {
+                    return;
+                }
+                const reason = runtimeError
+                    ? 'resume_message_failed'
+                    : (response?.reason || response?.error || 'resume_response_missing');
+                const resumed = !runtimeError && response?.resumed === true;
+                if (trigger === 'detected' || resumed || reason !== lastResumeReason) {
+                    forward({
+                        action: 'append',
+                        time: new Date().toISOString(),
+                        event: trigger === 'detected'
+                            ? 'bridge:schedule_resume_result'
+                            : 'bridge:schedule_watchdog_result',
+                        details: {
+                            trigger,
+                            ok: !runtimeError && response?.ok === true,
+                            resumed,
+                            reason
+                        }
+                    });
+                }
+                lastResumeReason = reason;
+            });
+        } catch (error) {
+            resumeRequestInFlight = false;
+            // The original runner may still own the transition. Resume is best-effort.
+        }
+    };
+
+    const detectScheduleForm = () => {
+        if (scheduleDetected) {
+            return true;
+        }
+
+        const forms = getVisibleScheduleForms();
+        if (forms.length === 0) {
+            return false;
+        }
+
+        scheduleDetected = true;
+        stopScheduleMonitor();
+        forward({
+            action: 'append',
+            time: new Date().toISOString(),
+            event: 'bridge:schedule_detected',
+            details: {
+                formCount: forms.length,
+                sourceOrderFormPresent: !!document.querySelector('.dirline_order_alt')
+            }
+        });
+        requestScheduleResume('detected');
+        scheduleWatchdogTimer = setInterval(() => {
+            requestScheduleResume('watchdog');
+        }, 1000);
+        return true;
+    };
+
+    const startScheduleMonitor = () => {
+        if (scheduleMonitorStarted) {
+            return;
+        }
+        scheduleMonitorStarted = true;
+
+        if (detectScheduleForm()) {
+            return;
+        }
+
+        scheduleObserver = new MutationObserver(detectScheduleForm);
+        scheduleObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style']
+        });
+        schedulePollTimer = setInterval(detectScheduleForm, 250);
+        scheduleTimeoutTimer = setTimeout(() => {
+            stopScheduleMonitor();
+            forward({
+                action: 'append',
+                time: new Date().toISOString(),
+                event: 'bridge:schedule_transition_timeout',
+                details: {
+                    timeoutMs: 30000,
+                    sourceOrderFormPresent: !!document.querySelector('.dirline_order_alt')
+                }
+            });
+        }, 30000);
+    };
+
+    const onMessage = (event) => {
+        const data = event?.data;
+        if (event.source !== window
+            || !data
+            || data.source !== 'fillbars-diagnostic-page-v1'
+            || data.runId !== diagnosticRunId
+            || data.token !== bridgeToken) {
+            return;
+        }
+
+        if (data.kind === 'append') {
+            if (data.event === 'assign_button:click') {
+                startScheduleMonitor();
+            }
+            forward({
+                action: 'append',
+                id: data.id,
+                time: data.time,
+                event: data.event,
+                details: data.details
+            });
+            return;
+        }
+
+        if (data.kind === 'complete') {
+            pageCompleted = true;
+            clearInterval(scheduleWatchdogTimer);
+            scheduleWatchdogTimer = null;
+            forward({
+                action: 'page_complete',
+                time: data.time,
+                status: data.status,
+                summary: data.summary
+            });
+            setTimeout(dispose, 1000);
+        }
+    };
+
+    const dispose = () => {
+        stopScheduleMonitor();
+        clearInterval(scheduleWatchdogTimer);
+        scheduleWatchdogTimer = null;
+        clearTimeout(lifetimeTimer);
+        window.removeEventListener('message', onMessage);
+        if (window[bridgeSlot]?.dispose === dispose) {
+            delete window[bridgeSlot];
+        }
+    };
+
+    window.addEventListener('message', onMessage);
+    window[bridgeSlot] = { runId: diagnosticRunId, dispose };
+    const lifetimeTimer = setTimeout(dispose, 10 * 60 * 1000);
+    forward({
+        action: 'append',
+        time: new Date().toISOString(),
+        event: 'bridge:installed',
+        details: {}
+    });
+    return { installed: true };
+}
 
 // Обработчик кнопки "Заполнить форму"
 document.getElementById('fillForm').addEventListener('click', () => {
@@ -2359,6 +3294,8 @@ document.getElementById('fillForm').addEventListener('click', () => {
     
     const formData = getProfileAnalyses(PROFILES[selectedProfile]);
     const assignmentSettings = getAssignmentSettings();
+    const diagnosticRun = createDiagnosticRun(selectedProfile, assignmentSettings);
+    const diagnosticBridgeToken = generateId('bridge');
     statusDiv.textContent = '⏳ Заполнение...';
     statusDiv.style.color = '#ff9800';
     fillButton.disabled = true;
@@ -2368,27 +3305,234 @@ document.getElementById('fillForm').addEventListener('click', () => {
             statusDiv.textContent = '❌ Ошибка: активная вкладка не найдена';
             statusDiv.style.color = '#f44336';
             fillButton.disabled = false;
+            completeDiagnosticRun(diagnosticRun, 'failed', {
+                reason: 'active_tab_not_found'
+            });
             return;
         }
 
+        appendDiagnosticRunEvent(diagnosticRun, 'popup:active_tab_found', {
+            tabId: tabs[0].id
+        });
+
         chrome.scripting.executeScript({
-            target: { tabId: tabs[0].id },
-            func: fillForm,
-            args: [formData, selectedProfile, assignmentSettings]
-        }, (results) => {
-            if (chrome.runtime.lastError) {
-                statusDiv.textContent = `❌ Ошибка: ${chrome.runtime.lastError.message}`;
-                statusDiv.style.color = '#f44336';
-            } else if (results && results[0] && results[0].result) {
-                const result = results[0].result;
-                statusDiv.textContent = `✅ ${result.message}`;
-                statusDiv.style.color = '#4CAF50';
+            target: { tabId: tabs[0].id, allFrames: true },
+            world: 'MAIN',
+            func: inspectBarsFrame
+        }, (probeResults) => {
+            const probeError = chrome.runtime.lastError?.message || null;
+            const targetFrame = probeError ? null : selectBarsFrame(probeResults);
+            appendDiagnosticRunEvent(diagnosticRun, 'popup:frame_probe', {
+                errorCode: classifyExtensionError(probeError),
+                selectedFrameId: targetFrame?.frameId ?? null,
+                frames: (probeResults || []).map((entry) => ({
+                    frameId: entry.frameId,
+                    score: entry.result?.score || 0,
+                    hasOrderForm: entry.result?.hasOrderForm === true,
+                    hasOrderShell: entry.result?.hasOrderShell === true,
+                    researchGridCount: entry.result?.researchGridCount || 0,
+                    checkboxCount: entry.result?.checkboxCount || 0,
+                    hasPatientContext: entry.result?.hasPatientContext === true,
+                    hasOpenLabButton: entry.result?.hasOpenLabButton === true,
+                    hasLabHistoryLink: entry.result?.hasLabHistoryLink === true,
+                    hasBarsApi: entry.result?.hasBarsApi === true
+                }))
+            });
+
+            if (probeError) {
+                console.warn('[FillBARS] Не удалось безопасно определить фрейм БАРС; запуск остановлен.', probeError);
             } else {
-                statusDiv.textContent = '✅ Заполнение выполнено';
-                statusDiv.style.color = '#4CAF50';
+                console.log('[FillBARS] Диагностика фреймов БАРС', (probeResults || []).map((entry) => ({
+                    frameId: entry.frameId,
+                    ...entry.result
+                })));
             }
 
-            fillButton.disabled = false;
+            if (!targetFrame) {
+                statusDiv.textContent = probeError
+                    ? '❌ Не удалось безопасно определить фрейм БАРС'
+                    : '❌ Не найден единственный безопасный фрейм БАРС';
+                statusDiv.style.color = '#f44336';
+                fillButton.disabled = false;
+                completeDiagnosticRun(diagnosticRun, 'failed', {
+                    reason: probeError ? 'frame_probe_failed' : 'safe_bars_frame_not_found',
+                    errorCode: classifyExtensionError(probeError),
+                    frameCount: (probeResults || []).length
+                });
+                return;
+            }
+
+            const executionTarget = { tabId: tabs[0].id, frameIds: [targetFrame.frameId] };
+
+            chrome.scripting.executeScript({
+                target: executionTarget,
+                world: 'ISOLATED',
+                func: installDiagnosticBridge,
+                args: [diagnosticRun.id, diagnosticBridgeToken, EXTENSION_VERSION, {
+                    profileName: selectedProfile,
+                    assignmentSettings,
+                    filledCount: Object.values(formData).filter((value) => value === true).length
+                }]
+            }, () => {
+                const bridgeError = chrome.runtime.lastError?.message || null;
+                appendDiagnosticRunEvent(diagnosticRun, 'popup:diagnostic_bridge', {
+                    installed: !bridgeError,
+                    errorCode: classifyExtensionError(bridgeError),
+                    selectedFrameId: targetFrame?.frameId ?? null
+                });
+
+                chrome.scripting.executeScript({
+                target: executionTarget,
+                world: 'MAIN',
+                files: ['bars-adapter.js']
+            }, () => {
+                const adapterError = chrome.runtime.lastError?.message || null;
+                if (adapterError) {
+                    statusDiv.textContent = `❌ Не удалось загрузить адаптер БАРС: ${adapterError}`;
+                    statusDiv.style.color = '#f44336';
+                    fillButton.disabled = false;
+                    completeDiagnosticRun(diagnosticRun, 'failed', {
+                        reason: 'adapter_load_failed',
+                        errorCode: classifyExtensionError(adapterError),
+                        selectedFrameId: targetFrame?.frameId ?? null
+                    });
+                    return;
+                }
+
+                appendDiagnosticRunEvent(diagnosticRun, 'popup:adapter_loaded', {
+                    selectedFrameId: targetFrame.frameId,
+                    allFrames: false
+                });
+
+                chrome.scripting.executeScript({
+                    target: executionTarget,
+                    world: 'MAIN',
+                    files: ['fill-runner.js']
+                }, () => {
+                    const runnerLoadError = chrome.runtime.lastError?.message || null;
+                    if (runnerLoadError) {
+                        statusDiv.textContent = `❌ Не удалось загрузить движок FillBARS: ${runnerLoadError}`;
+                        statusDiv.style.color = '#f44336';
+                        fillButton.disabled = false;
+                        completeDiagnosticRun(diagnosticRun, 'failed', {
+                            reason: 'runner_load_failed',
+                            errorCode: classifyExtensionError(runnerLoadError),
+                            selectedFrameId: targetFrame?.frameId ?? null
+                        });
+                        return;
+                    }
+
+                    appendDiagnosticRunEvent(diagnosticRun, 'popup:runner_loaded', {
+                        selectedFrameId: targetFrame.frameId,
+                        allFrames: false
+                    });
+
+                    chrome.scripting.executeScript({
+                        target: executionTarget,
+                        world: 'MAIN',
+                        func: invokeFillBARSRunner,
+                        args: [formData, selectedProfile, assignmentSettings, diagnosticRun.id, diagnosticBridgeToken]
+                    }, (results) => {
+                    const executeError = chrome.runtime.lastError?.message || null;
+                    const resultEntries = (results || [])
+                        .filter((entry) => entry?.result && typeof entry.result === 'object')
+                        .map((entry) => ({ frameId: entry.frameId, payload: entry.result }));
+                    const resultPayloads = resultEntries.map((entry) => entry.payload);
+                    const pageEvents = resultEntries.flatMap((entry) => Array.isArray(entry.payload.diagnostics)
+                        ? entry.payload.diagnostics.map((event) => ({
+                            ...event,
+                            details: {
+                                ...(event?.details && typeof event.details === 'object' ? event.details : {}),
+                                tabId: tabs[0].id,
+                                frameId: entry.frameId
+                            }
+                        }))
+                        : []);
+
+                    if (executeError) {
+                        statusDiv.textContent = `❌ Ошибка: ${executeError}`;
+                        statusDiv.style.color = '#f44336';
+                        completeDiagnosticRun(diagnosticRun, 'failed', {
+                            reason: 'fill_script_failed',
+                            errorCode: classifyExtensionError(executeError),
+                            selectedFrameId: targetFrame?.frameId ?? null
+                        }, pageEvents);
+                    } else if (results && results.length) {
+                        const successfulEntries = resultEntries.filter((entry) => !entry.payload.skipped);
+                        const selectedResultEntry = successfulEntries.find((entry) => entry.payload.filledCount > 0 || entry.payload.totalFound > 0)
+                            || successfulEntries[0];
+                        const result = selectedResultEntry?.payload || null;
+                        const selectedResultFrameId = selectedResultEntry?.frameId ?? targetFrame?.frameId ?? null;
+
+                        if (!result) {
+                            statusDiv.textContent = '❌ Не найдена карточка пациента или форма лаборатории БАРС';
+                            statusDiv.style.color = '#f44336';
+                            fillButton.disabled = false;
+                            completeDiagnosticRun(diagnosticRun, 'failed', {
+                                reason: 'bars_context_not_found',
+                                selectedFrameId: targetFrame?.frameId ?? null,
+                                resultCount: resultPayloads.length
+                            }, pageEvents);
+                            return;
+                        }
+
+                        const paginationStatus = result.pagination?.usedBarsRangeControl
+                            ? ' Штатная пагинация БАРС: 150 записей.'
+                            : '';
+                        const hasProgress = !result.fatalError && result.filledCount > 0;
+                        const isBlocked = result.blocked === true || result.scheduleResult?.blocked === true;
+                        const blockedReason = result.runnerBusy === true
+                            ? 'runner_already_active'
+                            : (result.blockReason || result.scheduleResult?.reason || 'workflow_blocked');
+                        const scheduleIncomplete = result.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE
+                            && result.scheduleResult?.complete !== true;
+                        const hasMissingResearches = (result.missingCount || 0) > 0;
+                        const isPartial = hasProgress && (hasMissingResearches || scheduleIncomplete);
+                        const runStatus = isBlocked
+                            ? 'partial'
+                            : (hasProgress ? (isPartial ? 'partial' : 'success') : 'failed');
+                        const statusIcon = runStatus === 'success' ? '✅' : (runStatus === 'partial' ? '⚠️' : '❌');
+                        statusDiv.textContent = `${statusIcon} ${result.message}${paginationStatus}`;
+                        statusDiv.style.color = runStatus === 'success' ? '#4CAF50' : (runStatus === 'partial' ? '#ff9800' : '#f44336');
+                        completeDiagnosticRun(diagnosticRun, runStatus, {
+                            reason: result.fatalError
+                                ? 'unhandled_error'
+                                : (isBlocked
+                                    ? blockedReason
+                                    : (runStatus === 'success'
+                                    ? 'completed'
+                                    : (runStatus === 'partial'
+                                        ? (scheduleIncomplete
+                                            ? (hasMissingResearches
+                                                ? 'completed_with_missing_researches_and_incomplete_schedule'
+                                                : 'completed_with_incomplete_schedule')
+                                            : 'completed_with_missing_researches')
+                                        : 'no_researches_processed'))),
+                            message: result.message,
+                            filledCount: result.filledCount || 0,
+                            totalFound: result.totalFound || 0,
+                            pagesProcessed: result.pagesProcessed || 0,
+                            missingCount: result.missingCount || 0,
+                            missingItemValues: result.missingItemValues || [],
+                            pagination: result.pagination || null,
+                            assignmentStage: result.assignmentStage || null,
+                            scheduleResult: result.scheduleResult || null,
+                            selectedFrameId: selectedResultFrameId
+                        }, pageEvents);
+                    } else {
+                        statusDiv.textContent = '❌ Сценарий не вернул результат';
+                        statusDiv.style.color = '#f44336';
+                        completeDiagnosticRun(diagnosticRun, 'failed', {
+                            reason: 'fill_script_returned_no_results',
+                            selectedFrameId: targetFrame?.frameId ?? null
+                        }, pageEvents);
+                    }
+
+                    fillButton.disabled = false;
+                });
+                });
+            });
+            });
         });
     });
 });
@@ -2397,1655 +3541,3 @@ document.getElementById('fillForm').addEventListener('click', () => {
 document.getElementById('closePopup').addEventListener('click', () => {
     window.close();
 });
-
-// ==============================================
-// ФУНКЦИЯ ЗАПОЛНЕНИЯ ФОРМЫ
-// ==============================================
-async function fillForm(formData, profileName, assignmentSettings = {}) {
-    console.log("╔════════════════════════════════════════════════════════════╗");
-    console.log("║  МИС БАРС - Автоматическое назначение анализов           ║");
-    console.log("║  Разработчик: MorozovRV and Bitucckii VA                 ║");
-    console.log("║  Версия: 4.3                                              ║");
-    console.log("╚════════════════════════════════════════════════════════════╝");
-    console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
-    
-    let filledCount = 0;
-
-    const CHECKBOX_SELECTOR = 'input[name="GridResearch_SelectList_Item"]';
-    const TARGET_PAGE_SIZE = 150;
-    const ASSIGNMENT_STAGE_ANALYSES = 'analyses';
-    const ASSIGNMENT_STAGE_SCHEDULE = 'schedule';
-    const targetCabinetName = String(assignmentSettings?.targetCabinet || '').trim();
-    const normalizedAssignmentStage = targetCabinetName && assignmentSettings?.assignmentStage === ASSIGNMENT_STAGE_SCHEDULE
-        ? ASSIGNMENT_STAGE_SCHEDULE
-        : ASSIGNMENT_STAGE_ANALYSES;
-    const shouldMarkUrgent = assignmentSettings?.markUrgent === true;
-
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-    const getCheckboxes = () => Array.from(document.querySelectorAll(CHECKBOX_SELECTOR));
-
-    const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-
-    const getElementLabel = (element) => normalizeText([
-        element.textContent,
-        element.value,
-        element.title,
-        element.getAttribute('aria-label')
-    ].filter(Boolean).join(' '));
-
-    const clickElement = (element, useDoubleClick = true) => {
-        const rect = element.getBoundingClientRect();
-        const clientX = rect.left + Math.max(1, rect.width / 2);
-        const clientY = rect.top + Math.max(1, rect.height / 2);
-        const makeMouseEvent = (type) => new MouseEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            clientX,
-            clientY,
-            screenX: window.screenX + clientX,
-            screenY: window.screenY + clientY,
-            button: 0,
-            buttons: type === 'mouseup' ? 0 : 1
-        });
-
-        element.dispatchEvent(makeMouseEvent('mouseover'));
-        element.dispatchEvent(makeMouseEvent('mousemove'));
-        element.dispatchEvent(makeMouseEvent('mousedown'));
-        element.dispatchEvent(makeMouseEvent('mouseup'));
-        element.dispatchEvent(makeMouseEvent('click'));
-        if (useDoubleClick) {
-            element.dispatchEvent(makeMouseEvent('dblclick'));
-        }
-    };
-
-    const isVisible = (element) => {
-        if (!element || !element.isConnected) {
-            return false;
-        }
-
-        const rect = element.getBoundingClientRect();
-        const style = window.getComputedStyle(element);
-
-        return rect.width > 0
-            && rect.height > 0
-            && style.display !== 'none'
-            && style.visibility !== 'hidden'
-            && style.opacity !== '0';
-    };
-
-    const findCheckboxByItemValue = (itemValue) => {
-        return getCheckboxes().find((checkbox) => checkbox.getAttribute('item_value') === itemValue);
-    };
-
-    const clickCheckboxLikeUser = (checkbox) => {
-        checkbox.scrollIntoView({ block: 'center', inline: 'nearest' });
-        if (typeof checkbox.focus === 'function') {
-            checkbox.focus();
-        }
-
-        checkbox.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
-        checkbox.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
-        checkbox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-        checkbox.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-        checkbox.click();
-    };
-
-    const waitForBarsToProcessSelection = async () => {
-        await sleep(220);
-    };
-
-    const setCheckboxStateThroughBars = async (itemValue, desiredState) => {
-        for (let attempt = 0; attempt < 3; attempt++) {
-            const checkbox = findCheckboxByItemValue(itemValue);
-
-            if (!checkbox) {
-                console.warn(`Анализ не найден на странице: ${itemValue}`);
-                return false;
-            }
-
-            if (checkbox.checked === desiredState) {
-                return true;
-            }
-
-            clickCheckboxLikeUser(checkbox);
-            await waitForBarsToProcessSelection();
-        }
-
-        return !!findCheckboxByItemValue(itemValue)?.checked === desiredState;
-    };
-
-    const resyncSelectedCheckboxThroughBars = async (itemValue) => {
-        const checkbox = findCheckboxByItemValue(itemValue);
-
-        if (!checkbox) {
-            console.warn(`Анализ не найден на странице: ${itemValue}`);
-            return false;
-        }
-
-        if (checkbox.checked) {
-            const isCleared = await setCheckboxStateThroughBars(itemValue, false);
-            if (!isCleared) {
-                return false;
-            }
-        }
-
-        return setCheckboxStateThroughBars(itemValue, true);
-    };
-
-    const dispatchValueEvents = (element) => {
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        element.dispatchEvent(new KeyboardEvent('keydown', {
-            bubbles: true,
-            cancelable: true,
-            key: 'Enter',
-            code: 'Enter',
-            keyCode: 13,
-            which: 13
-        }));
-        element.dispatchEvent(new KeyboardEvent('keypress', {
-            bubbles: true,
-            cancelable: true,
-            key: 'Enter',
-            code: 'Enter',
-            keyCode: 13,
-            which: 13
-        }));
-        element.dispatchEvent(new KeyboardEvent('keyup', {
-            bubbles: true,
-            cancelable: true,
-            key: 'Enter',
-            code: 'Enter',
-            keyCode: 13,
-            which: 13
-        }));
-        element.blur();
-    };
-
-    const isPagerArea = (element, root) => {
-        const rect = element.getBoundingClientRect();
-        const rootRect = root === document.body
-            ? { top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight }
-            : root.getBoundingClientRect();
-
-        const inRoot = rect.left >= rootRect.left - 20
-            && rect.right <= rootRect.right + 20
-            && rect.top >= rootRect.top - 20
-            && rect.bottom <= rootRect.bottom + 80;
-
-        const rootHeight = Math.max(rootRect.height, window.innerHeight);
-        const rootWidth = Math.max(rootRect.width, window.innerWidth);
-        const inBottomPart = rect.top >= rootRect.top + rootHeight * 0.35 || rect.bottom >= window.innerHeight * 0.5;
-        const inRightPart = rect.left >= rootRect.left + rootWidth * 0.3;
-
-        return inRoot && inBottomPart && inRightPart;
-    };
-
-    const waitForRowsReload = async (previousCount) => {
-        const startedAt = Date.now();
-
-        while (Date.now() - startedAt < 7000) {
-            await sleep(250);
-
-            const currentCount = getCheckboxes().length;
-            if (currentCount >= 100 || currentCount > previousCount) {
-                return currentCount;
-            }
-        }
-
-        return getCheckboxes().length;
-    };
-
-    const waitForCheckboxesToSettle = async () => {
-        const startedAt = Date.now();
-        let lastCount = getCheckboxes().length;
-        let stableSince = Date.now();
-
-        while (Date.now() - startedAt < 7000) {
-            await sleep(250);
-
-            const currentCount = getCheckboxes().length;
-            if (currentCount !== lastCount) {
-                lastCount = currentCount;
-                stableSince = Date.now();
-            }
-
-            if (currentCount > 0 && Date.now() - startedAt >= 1200 && Date.now() - stableSince >= 500) {
-                return currentCount;
-            }
-        }
-
-        return getCheckboxes().length;
-    };
-
-    const setInputValue = async (input, value) => {
-        input.focus();
-
-        const valuePrototype = input instanceof window.HTMLTextAreaElement
-            ? window.HTMLTextAreaElement.prototype
-            : window.HTMLInputElement.prototype;
-        const nativeSetter = Object.getOwnPropertyDescriptor(valuePrototype, 'value')?.set;
-        if (nativeSetter) {
-            nativeSetter.call(input, String(value));
-        } else {
-            input.value = String(value);
-        }
-
-        dispatchValueEvents(input);
-        await sleep(150);
-    };
-
-    const setSelectValue = async (select, value) => {
-        const targetOption = Array.from(select.options).find((option) => {
-            const optionValue = option.value.trim();
-            const optionText = option.textContent.trim();
-            return optionValue === String(value) || optionText === String(value);
-        });
-
-        if (!targetOption) {
-            return false;
-        }
-
-        select.value = targetOption.value;
-        dispatchValueEvents(select);
-        await sleep(150);
-        return true;
-    };
-
-    const setEditableText = async (element, value) => {
-        element.focus();
-
-        if (element.isContentEditable) {
-            element.textContent = String(value);
-        } else {
-            element.click();
-            await sleep(150);
-
-            const active = document.activeElement;
-            if (active && active !== element && /^(INPUT|TEXTAREA)$/i.test(active.tagName)) {
-                await setInputValue(active, value);
-                return true;
-            }
-
-            element.textContent = String(value);
-        }
-
-        dispatchValueEvents(element);
-        await sleep(150);
-        return true;
-    };
-
-    const openAllResearches = async () => {
-        const candidates = Array.from(document.querySelectorAll('button, a, span, div, td, input[type="button"], input[type="submit"]'))
-            .filter((element) => {
-                const label = getElementLabel(element);
-
-                return isVisible(element)
-                    && label.includes('все исследования')
-                    && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0;
-            })
-            .sort((left, right) => {
-                const leftLabel = getElementLabel(left);
-                const rightLabel = getElementLabel(right);
-                const leftExact = leftLabel === 'все исследования' ? 10000 : 0;
-                const rightExact = rightLabel === 'все исследования' ? 10000 : 0;
-                const leftTag = /^(BUTTON|A|INPUT)$/i.test(left.tagName) ? 1000 : 0;
-                const rightTag = /^(BUTTON|A|INPUT)$/i.test(right.tagName) ? 1000 : 0;
-
-                return (rightExact + rightTag - rightLabel.length) - (leftExact + leftTag - leftLabel.length);
-            });
-
-        const target = candidates[0];
-        if (!target) {
-            console.warn('Кнопка "Все исследования" не найдена. Продолжаю с текущим списком.');
-            return { clicked: false, count: getCheckboxes().length };
-        }
-
-        clickElement(target, false);
-        const count = await waitForCheckboxesToSettle();
-        console.log(`Открыт раздел "Все исследования". Текущих чек-боксов: ${count}`);
-
-        return { clicked: true, count };
-    };
-
-    const trySetPageSizeTo150 = async () => {
-        const currentCount = getCheckboxes().length;
-
-        if (currentCount >= 100) {
-            return { changed: false, reason: 'already_full', count: currentCount };
-        }
-
-        const root = document.body;
-        const pageSizes = new Set(['5', '10', '15', '20', '25', '30', '50', '100']);
-        const currentCountText = String(currentCount);
-        const editableSelector = 'input[type="number"], input[type="text"], input:not([type]), textarea, [contenteditable="true"]';
-        const isPotentialPageSizeInput = (input, allowEmpty = false) => {
-            const value = 'value' in input ? String(input.value).trim() : input.textContent.trim();
-            const marker = `${input.id || ''} ${input.name || ''} ${input.className || ''} ${input.getAttribute('aria-label') || ''}`;
-            const hasPageSizeMarker = /pagesize|page-size|size|row|limit|count|record|perpage|per-page|запис|строк|размер|колич/i.test(marker);
-
-            return isVisible(input)
-                && !input.disabled
-                && !input.readOnly
-                && isPagerArea(input, root)
-                && (pageSizes.has(value) || hasPageSizeMarker || (allowEmpty && value === ''));
-        };
-
-        const selects = Array.from(root.querySelectorAll('select'))
-            .filter((select) => isVisible(select) && !select.disabled && isPagerArea(select, root));
-
-        for (const select of selects) {
-            if (await setSelectValue(select, TARGET_PAGE_SIZE)) {
-                const count = await waitForRowsReload(currentCount);
-                return { changed: count > currentCount, reason: 'select', count };
-            }
-        }
-
-        const inputs = Array.from(root.querySelectorAll('input[type="number"], input[type="text"], input:not([type])'))
-            .filter((input) => isPotentialPageSizeInput(input));
-
-        for (const input of inputs) {
-            await setInputValue(input, TARGET_PAGE_SIZE);
-            const count = await waitForRowsReload(currentCount);
-
-            if (count > currentCount) {
-                return { changed: true, reason: 'input', count };
-            }
-        }
-
-        const clickableElements = Array.from(root.querySelectorAll('button, span, div, a, td'))
-            .filter((element) => {
-                const text = element.textContent.trim();
-                const marker = `${element.title || ''} ${element.getAttribute('aria-label') || ''} ${element.className || ''}`;
-                const isRecordsControl = /запис|record|row|pagesize|page-size/i.test(marker);
-
-                return isVisible(element)
-                    && isPagerArea(element, root)
-                    && (pageSizes.has(text) || text === currentCountText || isRecordsControl)
-                    && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0;
-            })
-            .sort((left, right) => {
-                const leftRect = left.getBoundingClientRect();
-                const rightRect = right.getBoundingClientRect();
-                const leftMarker = `${left.title || ''} ${left.getAttribute('aria-label') || ''} ${left.className || ''}`;
-                const rightMarker = `${right.title || ''} ${right.getAttribute('aria-label') || ''} ${right.className || ''}`;
-                const leftPriority = /запис|record|row|pagesize|page-size/i.test(leftMarker) ? 10000 : 0;
-                const rightPriority = /запис|record|row|pagesize|page-size/i.test(rightMarker) ? 10000 : 0;
-
-                return (rightPriority + rightRect.bottom + rightRect.right) - (leftPriority + leftRect.bottom + leftRect.right);
-            });
-
-        for (const element of clickableElements) {
-            const knownVisibleEditors = new Set(Array.from(document.querySelectorAll(editableSelector)).filter(isVisible));
-            clickElement(element);
-            await sleep(200);
-
-            const active = document.activeElement;
-            if (active && /^(INPUT|TEXTAREA)$/i.test(active.tagName) && isPotentialPageSizeInput(active, true)) {
-                await setInputValue(active, TARGET_PAGE_SIZE);
-            } else {
-                const editor = Array.from(document.querySelectorAll(editableSelector))
-                    .filter((candidate) => isPotentialPageSizeInput(candidate, true))
-                    .find((candidate) => !knownVisibleEditors.has(candidate));
-
-                if (!editor) {
-                    continue;
-                }
-
-                if (/^(INPUT|TEXTAREA)$/i.test(editor.tagName)) {
-                    await setInputValue(editor, TARGET_PAGE_SIZE);
-                } else {
-                    await setEditableText(editor, TARGET_PAGE_SIZE);
-                }
-            }
-
-            const count = await waitForRowsReload(currentCount);
-            if (count > currentCount) {
-                return { changed: true, reason: 'clickable', count };
-            }
-        }
-
-        return { changed: false, reason: 'not_found', count: getCheckboxes().length };
-    };
-
-    const ASSIGNMENT_CABINET_LABEL = normalizeText(targetCabinetName);
-    const ASSIGNMENT_CABINET_TOKENS = ASSIGNMENT_CABINET_LABEL.split(' ').filter(Boolean);
-    const DEBUG_LOG_KEY = '__FillBARS_DEBUG_LOGS';
-    const DEBUG_LOG_NODE_ID = 'fillbars-debug-logs';
-    const DEBUG_LOG_STORAGE_KEY = 'FillBARS.debugLogs';
-
-    window[DEBUG_LOG_KEY] = [];
-
-    const publishDebugLogs = () => {
-        const logs = window[DEBUG_LOG_KEY] || [];
-        const payload = JSON.stringify(logs, null, 2);
-
-        try {
-            sessionStorage.setItem(DEBUG_LOG_STORAGE_KEY, payload);
-        } catch (error) {
-            // Storage can be blocked by the host page; the DOM holder below is the fallback.
-        }
-
-        try {
-            let holder = document.getElementById(DEBUG_LOG_NODE_ID);
-            if (!holder) {
-                holder = document.createElement('script');
-                holder.id = DEBUG_LOG_NODE_ID;
-                holder.type = 'application/json';
-                (document.body || document.documentElement).appendChild(holder);
-            }
-
-            holder.textContent = payload;
-        } catch (error) {
-            console.warn('[FillBARS] Не удалось опубликовать отладочный лог', error);
-        }
-    };
-
-    const compactValue = (value) => {
-        if (value === undefined || value === null) {
-            return value;
-        }
-
-        if (typeof value === 'string') {
-            return value.length > 180 ? `${value.slice(0, 180)}...` : value;
-        }
-
-        if (Array.isArray(value)) {
-            return value.slice(0, 20).map(compactValue);
-        }
-
-        if (typeof value === 'object') {
-            return Object.fromEntries(
-                Object.entries(value).map(([key, entryValue]) => [key, compactValue(entryValue)])
-            );
-        }
-
-        return value;
-    };
-
-    const debugLog = (event, details = {}) => {
-        const entry = {
-            time: new Date().toISOString(),
-            event,
-            details: compactValue(details)
-        };
-
-        window[DEBUG_LOG_KEY].push(entry);
-        publishDebugLogs();
-        console.log(`[FillBARS] ${event}`, entry.details);
-        return entry;
-    };
-
-    debugLog('fill:start', {
-        profileName,
-        assignmentStage: normalizedAssignmentStage,
-        targetCabinetName,
-        shouldMarkUrgent
-    });
-    console.log('FillBARS debug: copy(document.getElementById("fillbars-debug-logs")?.textContent || sessionStorage.getItem("FillBARS.debugLogs") || "нет логов")');
-
-    const getVisibleElements = (selector, root = document) => {
-        return Array.from(root.querySelectorAll(selector)).filter(isVisible);
-    };
-
-    const isVisibleOrInsideVisibleControl = (element) => {
-        if (!element || !element.isConnected) {
-            return false;
-        }
-
-        if (isVisible(element)) {
-            return true;
-        }
-
-        let current = element.parentElement;
-        let depth = 0;
-        while (current && depth < 4) {
-            if (isVisible(current)) {
-                return true;
-            }
-
-            current = current.parentElement;
-            depth++;
-        }
-
-        return false;
-    };
-
-    const describeElement = (element) => {
-        if (!element) {
-            return null;
-        }
-
-        const rect = element.getBoundingClientRect();
-
-        return {
-            tag: element.tagName,
-            id: element.id || '',
-            className: String(element.className || ''),
-            name: element.name || '',
-            type: element.type || '',
-            title: element.title || '',
-            text: getElementLabel(element),
-            rect: {
-                left: Math.round(rect.left),
-                top: Math.round(rect.top),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height)
-            },
-            visible: isVisibleOrInsideVisibleControl(element)
-        };
-    };
-
-    const getClickableSurface = (element, stopRoot = document.body) => {
-        let current = element;
-        let depth = 0;
-
-        while (current && current !== stopRoot && depth < 4) {
-            if (isVisible(current)) {
-                return current;
-            }
-
-            current = current.parentElement;
-            depth++;
-        }
-
-        return element;
-    };
-
-    const waitForCondition = async (predicate, timeout = 10000, interval = 250) => {
-        const startedAt = Date.now();
-
-        while (Date.now() - startedAt < timeout) {
-            const result = predicate();
-            if (result) {
-                return result;
-            }
-
-            await sleep(interval);
-        }
-
-        return null;
-    };
-
-    const getZIndex = (element) => {
-        const parsed = Number.parseInt(window.getComputedStyle(element).zIndex, 10);
-        return Number.isFinite(parsed) ? parsed : 0;
-    };
-
-    const sortByWindowStack = (left, right) => {
-        const zIndexDiff = getZIndex(left) - getZIndex(right);
-        if (zIndexDiff !== 0) {
-            return zIndexDiff;
-        }
-
-        if (left === right) {
-            return 0;
-        }
-
-        return left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-    };
-
-    const getWindowRoot = (element) => {
-        return element?.closest('table.window.WinContent, .window.WinContent, .window') || element;
-    };
-
-    const getVisibleWindows = () => {
-        return getVisibleElements('table.window.WinContent, .window.WinContent');
-    };
-
-    const getTopVisibleWindow = (predicate = () => true) => {
-        return getVisibleWindows()
-            .filter(predicate)
-            .sort(sortByWindowStack)
-            .at(-1) || null;
-    };
-
-    const findScheduleForm = () => {
-        return getVisibleElements('.form-schedule')
-            .sort(sortByWindowStack)
-            .at(-1) || null;
-    };
-
-    const findScheduleWindow = () => {
-        const scheduleForm = findScheduleForm();
-        return scheduleForm ? getWindowRoot(scheduleForm) : null;
-    };
-
-    const hasCabinetLabel = (label) => {
-        return ASSIGNMENT_CABINET_TOKENS.length > 0
-            && ASSIGNMENT_CABINET_TOKENS.every((token) => label.includes(token));
-    };
-
-    const getGridRoot = (element) => {
-        return element?.closest('.grid, .grid_container, .grid-container') || element;
-    };
-
-    const getSelectableGridRow = (element, root) => {
-        if (!element) {
-            return null;
-        }
-
-        const row = element.closest('tr, [role="row"]');
-        if (row && (!root || root.contains(row))) {
-            return row;
-        }
-
-        const dataCell = element.closest('.column_data');
-        if (dataCell && (!root || root.contains(dataCell))) {
-            return dataCell;
-        }
-
-        return element;
-    };
-
-    const normalizeClickableCandidate = (element) => {
-        return element.closest('.ctrl_button, button, input[type="button"], input[type="submit"], a') || element;
-    };
-
-    const deduplicateElements = (elements) => {
-        const seen = new Set();
-
-        return elements.filter((element) => {
-            if (!element || seen.has(element)) {
-                return false;
-            }
-
-            seen.add(element);
-            return true;
-        });
-    };
-
-    const getElementPositionKey = (element) => {
-        const rect = element.getBoundingClientRect();
-        return `${Math.round(rect.left)}:${Math.round(rect.top)}:${Math.round(rect.width)}:${Math.round(rect.height)}:${element.name || ''}`;
-    };
-
-    const uniqueElementsByPosition = (elements) => {
-        const seen = new Set();
-
-        return elements.filter((element) => {
-            const key = getElementPositionKey(element);
-            if (seen.has(key)) {
-                return false;
-            }
-
-            seen.add(key);
-            return true;
-        });
-    };
-
-    const getScheduleGridRoot = (scheduleForm) => {
-        return scheduleForm.querySelector('.selected_values') || scheduleForm;
-    };
-
-    const findColumnHeaderRect = (root, columnLabel) => {
-        const normalizedColumnLabel = normalizeText(columnLabel);
-        const headers = getVisibleElements('td, th, div, span', root)
-            .filter((element) => {
-                const label = getElementLabel(element);
-                return label === normalizedColumnLabel
-                    || label === `сортировать колонку: ${normalizedColumnLabel}`;
-            })
-            .sort((left, right) => {
-                const leftLabel = getElementLabel(left);
-                const rightLabel = getElementLabel(right);
-                const leftPriority = (leftLabel === normalizedColumnLabel ? 10000 : 0) - leftLabel.length;
-                const rightPriority = (rightLabel === normalizedColumnLabel ? 10000 : 0) - rightLabel.length;
-
-                return rightPriority - leftPriority;
-            });
-
-        return headers[0]?.getBoundingClientRect() || null;
-    };
-
-    const isElementInColumn = (element, headerRect, tolerance = 35) => {
-        if (!headerRect) {
-            return false;
-        }
-
-        const rect = element.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-
-        return centerX >= headerRect.left - tolerance
-            && centerX <= headerRect.right + tolerance
-            && rect.top > headerRect.top;
-    };
-
-    const clickAssignButton = async () => {
-        if (findScheduleForm()) {
-            return true;
-        }
-
-        const root = getVisibleElements('.dirline_order_alt').at(-1) || document.body;
-        const candidates = deduplicateElements(
-            Array.from(root.querySelectorAll('button, a, span, div, input[type="button"], input[type="submit"]'))
-                .filter((element) => {
-                    const label = getElementLabel(element);
-
-                    return isVisible(element)
-                        && label.includes('назначить')
-                        && label.length <= 80
-                        && element.querySelectorAll(CHECKBOX_SELECTOR).length === 0;
-                })
-                .map(normalizeClickableCandidate)
-        ).sort((left, right) => {
-            const leftLabel = getElementLabel(left);
-            const rightLabel = getElementLabel(right);
-            const leftPriority = (leftLabel === 'назначить' ? 10000 : 0)
-                + (left.classList.contains('ctrl_button') ? 5000 : 0)
-                + (/^(BUTTON|A|INPUT)$/i.test(left.tagName) ? 1000 : 0)
-                - leftLabel.length;
-            const rightPriority = (rightLabel === 'назначить' ? 10000 : 0)
-                + (right.classList.contains('ctrl_button') ? 5000 : 0)
-                + (/^(BUTTON|A|INPUT)$/i.test(right.tagName) ? 1000 : 0)
-                - rightLabel.length;
-
-            return rightPriority - leftPriority;
-        });
-
-        const target = candidates[0];
-        if (!target) {
-            console.warn('Кнопка "Назначить" не найдена. Подбор времени не открываю.');
-            debugLog('assign_button:not_found');
-            return false;
-        }
-
-        target.scrollIntoView({ block: 'center', inline: 'nearest' });
-        debugLog('assign_button:click', { target: describeElement(target) });
-        clickElement(target, false);
-
-        const scheduleForm = await waitForCondition(findScheduleForm, 15000);
-        if (!scheduleForm) {
-            console.warn('Окно "Подбор времени записи на услугу" не открылось.');
-            debugLog('schedule:not_opened');
-            return false;
-        }
-
-        console.log('Открыто окно "Подбор времени записи на услугу".');
-        debugLog('schedule:opened', { scheduleForm: describeElement(scheduleForm) });
-        return true;
-    };
-
-    const getScheduleCabinetGuideButtons = (scheduleForm) => {
-        const cabinetHeaderRect = findColumnHeaderRect(scheduleForm, 'Кабинет');
-        const buttons = uniqueElementsByPosition(
-            Array.from(scheduleForm.querySelectorAll('.ctrl_ButtonEdit_ButGuide'))
-                .filter(isVisible)
-                .filter((button) => !button.closest('.grid_header'))
-        );
-        const buttonsInCabinetColumn = buttons.filter((button) => isElementInColumn(button, cabinetHeaderRect, 80));
-        const resultButtons = buttonsInCabinetColumn.length > 0 ? buttonsInCabinetColumn : buttons;
-
-        return resultButtons
-            .sort((left, right) => {
-                const leftRect = left.getBoundingClientRect();
-                const rightRect = right.getBoundingClientRect();
-                return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
-            })
-            .map((button) => ({
-                button,
-                row: button.closest('tr') || button.parentElement
-            }));
-    };
-
-    const activateElementAtCenter = async (element, useDoubleClick = false, useNativeClick = false) => {
-        if (!element || !element.isConnected) {
-            debugLog('element_activate:missing', { useDoubleClick, useNativeClick });
-            return false;
-        }
-
-        element.scrollIntoView({ block: 'center', inline: 'nearest' });
-        await sleep(60);
-
-        if (!isVisible(element)) {
-            debugLog('element_activate:not_visible', { element: describeElement(element), useDoubleClick, useNativeClick });
-            return false;
-        }
-
-        const rect = element.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        const hitElement = document.elementFromPoint(centerX, centerY);
-        const target = hitElement && (element.contains(hitElement) || hitElement.contains(element))
-            ? hitElement
-            : element;
-
-        debugLog('element_activate:click', {
-            element: describeElement(element),
-            target: describeElement(target),
-            centerX: Math.round(centerX),
-            centerY: Math.round(centerY),
-            useDoubleClick,
-            useNativeClick
-        });
-        clickElement(target, useDoubleClick);
-
-        if (useNativeClick && typeof target.click === 'function') {
-            target.click();
-        }
-
-        await sleep(120);
-        return true;
-    };
-
-    const isCabinetPickerWindow = (windowElement) => {
-        if (!windowElement || !windowElement.isConnected || !isVisibleOrInsideVisibleControl(windowElement)) {
-            return false;
-        }
-
-        if (windowElement.querySelector('.form-schedule')) {
-            return false;
-        }
-
-        const label = getElementLabel(windowElement);
-        return label.startsWith('кабинеты')
-            || label.includes('кабинеты наименование')
-            || label.includes('кабинетыструктура файла');
-    };
-
-    const waitForCabinetWindow = async (scheduleWindow, previousWindows, timeout = 8000) => {
-        const cabinetWindow = await waitForCondition(() => {
-            const candidates = getVisibleWindows()
-                .filter((windowElement) => windowElement !== scheduleWindow)
-                .filter(isCabinetPickerWindow)
-                .sort(sortByWindowStack);
-            const newCandidate = candidates
-                .filter((windowElement) => !previousWindows.has(windowElement))
-                .at(-1);
-
-            return newCandidate || candidates.at(-1) || null;
-        }, timeout, 200);
-
-        if (cabinetWindow) {
-            debugLog('cabinet_window:opened', {
-                isNew: !previousWindows.has(cabinetWindow),
-                window: describeElement(cabinetWindow)
-            });
-        } else {
-            debugLog('cabinet_window:not_found', {
-                windows: getVisibleWindows().map((windowElement) => ({
-                    isPrevious: previousWindows.has(windowElement),
-                    isCabinetPicker: isCabinetPickerWindow(windowElement),
-                    containsScheduleForm: !!windowElement.querySelector('.form-schedule'),
-                    window: describeElement(windowElement)
-                }))
-            });
-        }
-
-        return cabinetWindow;
-    };
-
-    const findCabinetRow = (cabinetWindow) => {
-        const root = getGridRoot(cabinetWindow.querySelector('.grid.box-sizing-force.m2, .grid')) || cabinetWindow;
-        const elements = Array.from(root.querySelectorAll('tr, [role="row"], td, div, span'))
-            .filter(isVisibleOrInsideVisibleControl)
-            .filter((element) => hasCabinetLabel(getElementLabel(element)))
-            .sort((left, right) => {
-                const leftLabel = getElementLabel(left);
-                const rightLabel = getElementLabel(right);
-                const leftPriority = (leftLabel === ASSIGNMENT_CABINET_LABEL ? 10000 : 0)
-                    + (/^(TR)$/i.test(left.tagName) ? 500 : 0)
-                    - leftLabel.length;
-                const rightPriority = (rightLabel === ASSIGNMENT_CABINET_LABEL ? 10000 : 0)
-                    + (/^(TR)$/i.test(right.tagName) ? 500 : 0)
-                    - rightLabel.length;
-
-                return rightPriority - leftPriority;
-            });
-
-        return getSelectableGridRow(elements[0], root);
-    };
-
-    const clickShortLabeledControl = async (root, labels) => {
-        const normalizedLabels = labels.map(normalizeText);
-        const candidates = deduplicateElements(
-            Array.from(root.querySelectorAll('button, a, span, div, input[type="button"], input[type="submit"]'))
-                .filter((element) => {
-                    const label = getElementLabel(element);
-
-                    return isVisibleOrInsideVisibleControl(element)
-                        && normalizedLabels.includes(label)
-                        && label.length <= 30;
-                })
-                .map((element) => getClickableSurface(normalizeClickableCandidate(element), root))
-        ).sort((left, right) => getElementLabel(left).length - getElementLabel(right).length);
-
-        const target = candidates[0];
-        if (!target) {
-            return false;
-        }
-
-        target.scrollIntoView({ block: 'center', inline: 'nearest' });
-        clickElement(target, false);
-        await sleep(300);
-
-        return true;
-    };
-
-    const openCabinetFilter = async (cabinetWindow) => {
-        const gridRoot = getGridRoot(cabinetWindow.querySelector('.grid.box-sizing-force.m2, .grid')) || cabinetWindow;
-        const beforeInputsCount = getVisibleElements('input[type="text"], input:not([type]), textarea', gridRoot).length;
-        const filterButtons = Array.from(gridRoot.querySelectorAll('.toggleFilter, .toggleFilterSize, .fshow, .grid_label, [title="Фильтр"]'))
-            .filter(isVisibleOrInsideVisibleControl)
-            .filter((element) => {
-                const label = getElementLabel(element);
-                const marker = normalizeText(`${element.title || ''} ${element.className || ''}`);
-
-                return marker.includes('фильтр') || label.includes('показать фильтр');
-            });
-
-        for (const button of filterButtons) {
-            clickElement(getClickableSurface(button, gridRoot), false);
-            await sleep(350);
-
-            const afterInputsCount = getVisibleElements('input[type="text"], input:not([type]), textarea', gridRoot).length;
-            const hasHideFilter = getElementLabel(gridRoot).includes('скрыть фильтр');
-
-            if (afterInputsCount > beforeInputsCount || hasHideFilter) {
-                return true;
-            }
-        }
-
-        return false;
-    };
-
-    const clickFindInCabinetWindow = async (cabinetWindow) => {
-        const gridRoot = getGridRoot(cabinetWindow.querySelector('.grid.box-sizing-force.m2, .grid')) || cabinetWindow;
-        return clickShortLabeledControl(gridRoot, ['Найти']);
-    };
-
-    const filterCabinetWindow = async (cabinetWindow) => {
-        await openCabinetFilter(cabinetWindow);
-
-        const gridRoot = getGridRoot(cabinetWindow.querySelector('.grid.box-sizing-force.m2, .grid')) || cabinetWindow;
-        const inputs = getVisibleElements('input[type="text"], input:not([type]), textarea', gridRoot)
-            .filter((input) => !input.disabled && !input.readOnly)
-            .sort((left, right) => {
-                const leftRect = left.getBoundingClientRect();
-                const rightRect = right.getBoundingClientRect();
-                return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
-            });
-
-        console.log(`Окно "Кабинеты": полей фильтра найдено ${inputs.length}.`);
-        debugLog('cabinet_filter:inputs_found', {
-            inputCount: inputs.length,
-            inputs: inputs.map(describeElement)
-        });
-
-        for (const input of inputs) {
-            debugLog('cabinet_filter:set_value', { input: describeElement(input) });
-            await setInputValue(input, targetCabinetName);
-            await clickFindInCabinetWindow(cabinetWindow);
-            await sleep(900);
-
-            const row = findCabinetRow(cabinetWindow);
-            if (row) {
-                debugLog('cabinet_filter:row_found', { row: describeElement(row) });
-                return row;
-            }
-        }
-
-        debugLog('cabinet_filter:row_not_found');
-        return null;
-    };
-
-    const isModalWindowOpen = (windowElement) => {
-        return !!windowElement && windowElement.isConnected && isVisibleOrInsideVisibleControl(windowElement);
-    };
-
-    const waitForWindowToClose = async (windowElement, timeout = 5000) => {
-        return waitForCondition(() => !isModalWindowOpen(windowElement), timeout, 200);
-    };
-
-    const dispatchEnter = (element) => {
-        const target = element || document.activeElement || document.body;
-
-        ['keydown', 'keypress', 'keyup'].forEach((type) => {
-            target.dispatchEvent(new KeyboardEvent(type, {
-                bubbles: true,
-                cancelable: true,
-                key: 'Enter',
-                code: 'Enter',
-                keyCode: 13,
-                which: 13
-            }));
-        });
-    };
-
-    const dispatchEscape = (element) => {
-        const target = element || document.activeElement || document.body;
-
-        ['keydown', 'keypress', 'keyup'].forEach((type) => {
-            target.dispatchEvent(new KeyboardEvent(type, {
-                bubbles: true,
-                cancelable: true,
-                key: 'Escape',
-                code: 'Escape',
-                keyCode: 27,
-                which: 27
-            }));
-        });
-    };
-
-    const clickOkInWindow = async (windowElement) => {
-        const windowRect = windowElement.getBoundingClientRect();
-        const candidates = deduplicateElements(
-            Array.from(windowElement.querySelectorAll('.ctrl_button, .btn_caption, button, a, span, div, input[type="button"], input[type="submit"]'))
-                .filter((element) => {
-                    const label = getElementLabel(element);
-                    const rect = element.getBoundingClientRect();
-                    const marker = normalizeText(`${element.className || ''} ${element.title || ''}`);
-                    const isFooterButton = marker.includes('btn_center') && rect.top >= windowRect.bottom - 140;
-
-                    return isVisibleOrInsideVisibleControl(element)
-                        && !label.includes('отмена')
-                        && !label.includes('найти')
-                        && !label.includes('фильтр')
-                        && !label.includes('очистить')
-                        && (label === 'ок' || label === 'ok' || label === 'выбрать' || isFooterButton)
-                        && label.length <= 30
-                        && rect.top >= windowRect.top
-                        && rect.bottom <= windowRect.bottom + 10;
-                })
-                .map((element) => getClickableSurface(normalizeClickableCandidate(element), windowElement))
-        ).sort((left, right) => {
-            const leftLabel = getElementLabel(left);
-            const rightLabel = getElementLabel(right);
-            const leftRect = left.getBoundingClientRect();
-            const rightRect = right.getBoundingClientRect();
-            const leftPriority = (leftLabel === 'ок' || leftLabel === 'ok' ? 10000 : 0)
-                + (leftLabel === 'выбрать' ? 7000 : 0)
-                + (left.classList.contains('ctrl_button') ? 5000 : 0)
-                + leftRect.top
-                - leftLabel.length;
-            const rightPriority = (rightLabel === 'ок' || rightLabel === 'ok' ? 10000 : 0)
-                + (rightLabel === 'выбрать' ? 7000 : 0)
-                + (right.classList.contains('ctrl_button') ? 5000 : 0)
-                + rightRect.top
-                - rightLabel.length;
-
-            return rightPriority - leftPriority;
-        });
-
-        const okButton = candidates[0];
-        if (!okButton) {
-            return false;
-        }
-
-        okButton.scrollIntoView({ block: 'center', inline: 'nearest' });
-        console.log(`Окно "Кабинеты": нажимаю "${getElementLabel(okButton) || 'ОК'}".`);
-        debugLog('cabinet_confirm:ok_click', { button: describeElement(okButton) });
-        clickElement(okButton, false);
-        await sleep(500);
-
-        return true;
-    };
-
-    const clickCancelInWindow = async (windowElement) => {
-        debugLog('cabinet_close:try_cancel');
-        const clickedCancel = await clickShortLabeledControl(windowElement, ['Отмена', 'Закрыть']);
-        if (clickedCancel) {
-            await sleep(500);
-            return true;
-        }
-
-        const closeButtons = Array.from(windowElement.querySelectorAll('[title*="Закрыть"], .win_close, .win_closeButton, .close, .WinClose'))
-            .filter(isVisibleOrInsideVisibleControl);
-
-        for (const button of closeButtons) {
-            debugLog('cabinet_close:close_button_click', { button: describeElement(button) });
-            clickElement(getClickableSurface(button, windowElement), false);
-            await sleep(500);
-            return true;
-        }
-
-        debugLog('cabinet_close:no_cancel_button');
-        return false;
-    };
-
-    const getScheduleGuideAtIndex = (index) => {
-        const scheduleForm = findScheduleForm();
-        const guideButtons = scheduleForm ? getScheduleCabinetGuideButtons(scheduleForm) : [];
-        return guideButtons[index] || null;
-    };
-
-    const isCabinetAppliedToSchedule = (guide, index) => {
-        const currentGuide = getScheduleGuideAtIndex(index) || guide;
-        const row = currentGuide?.row || currentGuide?.button?.closest('tr');
-        const control = currentGuide?.button?.closest('.ctrl_ButtonEdit, .editControl, td, tr');
-
-        return hasCabinetLabel(getElementLabel(row))
-            || hasCabinetLabel(getElementLabel(control));
-    };
-
-    const waitForCabinetAppliedToSchedule = async (guide, index, timeout = 3000) => {
-        return waitForCondition(() => isCabinetAppliedToSchedule(guide, index), timeout, 200);
-    };
-
-    const closeCabinetWindowAfterApplied = async (cabinetWindow) => {
-        if (!isModalWindowOpen(cabinetWindow)) {
-            debugLog('cabinet_close:already_closed_after_apply');
-            return true;
-        }
-
-        console.log('Окно "Кабинеты": значение применилось, закрываю справочник без повторного подтверждения.');
-        debugLog('cabinet_close:after_applied_start', { window: describeElement(cabinetWindow) });
-
-        if (await clickCancelInWindow(cabinetWindow)) {
-            if (await waitForWindowToClose(cabinetWindow, 4000)) {
-                debugLog('cabinet_close:closed_by_cancel');
-                return true;
-            }
-        }
-
-        dispatchEscape(document.activeElement);
-        await sleep(700);
-
-        if (await waitForWindowToClose(cabinetWindow, 3000)) {
-            debugLog('cabinet_close:closed_by_escape');
-            return true;
-        }
-
-        console.warn('Окно "Кабинеты" не закрылось после применения значения. Останавливаю дальнейшую обработку.');
-        debugLog('cabinet_close:failed_after_applied', { window: describeElement(cabinetWindow) });
-        return false;
-    };
-
-    const confirmCabinetSelection = async (cabinetWindow, cabinetRow) => {
-        if (!isModalWindowOpen(cabinetWindow)) {
-            return true;
-        }
-
-        if (await clickOkInWindow(cabinetWindow)) {
-            if (await waitForWindowToClose(cabinetWindow, 5000)) {
-                return true;
-            }
-        }
-
-        if (cabinetRow?.isConnected) {
-            cabinetRow.focus?.();
-            dispatchEnter(cabinetRow);
-            await sleep(600);
-
-            if (await waitForWindowToClose(cabinetWindow, 3000)) {
-                return true;
-            }
-        }
-
-        dispatchEnter(document.activeElement);
-        await sleep(600);
-
-        if (await waitForWindowToClose(cabinetWindow, 3000)) {
-            return true;
-        }
-
-        console.warn('Окно "Кабинеты" не закрылось автоматически. Выбор уже сделан, но окно осталось открытым.');
-        return false;
-    };
-
-    const selectCabinetInWindow = async (cabinetWindow, guide, index) => {
-        debugLog('cabinet_select:start', {
-            index,
-            cabinetWindow: describeElement(cabinetWindow),
-            guide: describeElement(guide?.button)
-        });
-
-        let cabinetRow = await waitForCondition(() => findCabinetRow(cabinetWindow), 3000, 250);
-        if (!cabinetRow) {
-            cabinetRow = await filterCabinetWindow(cabinetWindow);
-        }
-
-        if (!cabinetRow) {
-            console.warn(`В окне "Кабинеты" не найдена строка "${targetCabinetName}".`);
-            debugLog('cabinet_select:row_not_found', {
-                index,
-                cabinetWindow: describeElement(cabinetWindow)
-            });
-            return false;
-        }
-
-        cabinetRow.scrollIntoView({ block: 'center', inline: 'nearest' });
-        console.log(`Окно "Кабинеты": выбираю "${targetCabinetName}".`);
-        debugLog('cabinet_select:row_click', {
-            index,
-            row: describeElement(cabinetRow)
-        });
-        clickElement(cabinetRow, true);
-        await sleep(700);
-
-        if (await waitForCabinetAppliedToSchedule(guide, index, 3500)) {
-            debugLog('cabinet_select:applied_after_row_click', { index });
-            return closeCabinetWindowAfterApplied(cabinetWindow);
-        }
-
-        if (!isModalWindowOpen(cabinetWindow)) {
-            debugLog('cabinet_select:assume_applied_after_window_closed', { index });
-            return true;
-        }
-
-        if (isModalWindowOpen(cabinetWindow)) {
-            await confirmCabinetSelection(cabinetWindow, cabinetRow);
-        }
-
-        if (await waitForCabinetAppliedToSchedule(guide, index, 2500)) {
-            debugLog('cabinet_select:applied_after_confirm', { index });
-            return closeCabinetWindowAfterApplied(cabinetWindow);
-        }
-
-        if (!isModalWindowOpen(cabinetWindow)) {
-            debugLog('cabinet_select:assume_applied_after_confirm_closed', { index });
-            return true;
-        }
-
-        console.warn(`${targetCabinetName} не применился для строки ${index + 1}. Останавливаю дальнейшую обработку.`);
-        debugLog('cabinet_select:not_applied', {
-            index,
-            guide: describeElement(guide?.button),
-            snapshot: getScheduleDebugSnapshot()
-        });
-        return false;
-    };
-
-    const chooseCabinetsInSchedule = async () => {
-        const scheduleReady = await waitForScheduleReady();
-        if (!scheduleReady?.scheduleForm) {
-            return { selected: 0, total: 0 };
-        }
-
-        let selected = 0;
-        let total = getScheduleCabinetGuideButtons(scheduleReady.scheduleForm).length;
-        let stopped = false;
-        console.log(`Подбор времени: найдено кнопок выбора кабинета: ${total}`);
-        debugLog('cabinet_choose:start', { total, snapshot: getScheduleDebugSnapshot() });
-
-        for (let index = 0; index < total; index++) {
-            const guide = await waitForCondition(() => {
-                const scheduleForm = findScheduleForm();
-                const guideButtons = scheduleForm ? getScheduleCabinetGuideButtons(scheduleForm) : [];
-
-                if (guideButtons.length > total) {
-                    total = guideButtons.length;
-                }
-
-                return guideButtons[index]?.button?.isConnected && isVisible(guideButtons[index].button)
-                    ? guideButtons[index]
-                    : null;
-            }, 5000, 200);
-            const scheduleWindow = findScheduleWindow();
-            if (!guide || !scheduleWindow) {
-                debugLog('cabinet_choose:guide_missing', { index, total, snapshot: getScheduleDebugSnapshot() });
-                continue;
-            }
-
-            if (isCabinetAppliedToSchedule(guide, index)) {
-                selected++;
-                debugLog('cabinet_choose:already_applied', {
-                    index,
-                    guide: describeElement(guide.button)
-                });
-                continue;
-            }
-
-            console.log(`Подбор времени: выбираю кабинет для строки ${index + 1}/${total}.`);
-            debugLog('cabinet_choose:open_window', {
-                index,
-                total,
-                guide: describeElement(guide.button),
-                row: describeElement(guide.row)
-            });
-            const previousWindows = new Set(getVisibleWindows());
-            await activateElementAtCenter(guide.button, false, false);
-
-            let cabinetWindow = await waitForCabinetWindow(scheduleWindow, previousWindows, 7000);
-            if (!cabinetWindow && guide.button.isConnected) {
-                await activateElementAtCenter(guide.button, true, false);
-                cabinetWindow = await waitForCabinetWindow(scheduleWindow, previousWindows, 6000);
-            }
-
-            if (!cabinetWindow && guide.button.isConnected) {
-                await activateElementAtCenter(guide.button, false, true);
-                cabinetWindow = await waitForCabinetWindow(scheduleWindow, previousWindows, 8000);
-            }
-
-            if (!cabinetWindow) {
-                console.warn(`Окно "Кабинеты" не открылось для строки ${index + 1}.`);
-                debugLog('cabinet_choose:window_not_opened', {
-                    index,
-                    guide: describeElement(guide.button),
-                    snapshot: getScheduleDebugSnapshot()
-                });
-                stopped = true;
-                break;
-            }
-
-            const isSelected = await selectCabinetInWindow(cabinetWindow, guide, index);
-            if (isSelected) {
-                selected++;
-                debugLog('cabinet_choose:selected', { index, selected, total });
-            } else {
-                debugLog('cabinet_choose:stop_after_failed_select', {
-                    index,
-                    selected,
-                    total,
-                    modalStillOpen: isModalWindowOpen(cabinetWindow),
-                    snapshot: getScheduleDebugSnapshot()
-                });
-                stopped = true;
-                break;
-            }
-
-            await sleep(350);
-        }
-
-        debugLog('cabinet_choose:done', { selected, total, stopped, snapshot: getScheduleDebugSnapshot() });
-        return { selected, total, stopped };
-    };
-
-    const uniqueCheckboxesByPosition = (checkboxes) => {
-        return uniqueElementsByPosition(checkboxes);
-    };
-
-    const findUrgentCheckboxesInSchedule = (scheduleForm) => {
-        const gridRoot = getScheduleGridRoot(scheduleForm);
-        const checkboxes = getVisibleElements('input[type="checkbox"]', gridRoot)
-            .filter((checkbox) => !checkbox.disabled);
-
-        const namedUrgent = checkboxes.filter((checkbox) => {
-            const marker = normalizeText([
-                checkbox.name,
-                checkbox.id,
-                checkbox.className,
-                checkbox.title
-            ].filter(Boolean).join(' '));
-
-            return marker.includes('cito') || marker.includes('сроч');
-        });
-
-        if (namedUrgent.length > 0) {
-            return uniqueCheckboxesByPosition(namedUrgent);
-        }
-
-        const urgentHeaderRect = findColumnHeaderRect(gridRoot, 'Срочно');
-        if (!urgentHeaderRect) {
-            return [];
-        }
-
-        return uniqueCheckboxesByPosition(checkboxes
-            .filter((checkbox) => checkbox.name !== 'GridServices_SelectList_Item')
-            .filter((checkbox) => isElementInColumn(checkbox, urgentHeaderRect, 35)));
-    };
-
-    const getScheduleDebugSnapshot = () => {
-        const scheduleForm = findScheduleForm();
-        const guideButtons = scheduleForm ? getScheduleCabinetGuideButtons(scheduleForm) : [];
-        const urgentCheckboxes = scheduleForm ? findUrgentCheckboxesInSchedule(scheduleForm) : [];
-
-        return {
-            hasScheduleForm: !!scheduleForm,
-            scheduleForm: describeElement(scheduleForm),
-            guideCount: guideButtons.length,
-            urgentCount: urgentCheckboxes.length,
-            guides: guideButtons.map((guide, index) => ({
-                index,
-                button: describeElement(guide.button),
-                row: describeElement(guide.row)
-            })),
-            urgentCheckboxes: urgentCheckboxes.map((checkbox, index) => ({
-                index,
-                checkbox: describeElement(checkbox),
-                checked: checkbox.checked
-            })),
-            windows: getVisibleWindows().map((windowElement, index) => {
-                const label = getElementLabel(windowElement);
-                return {
-                    index,
-                    window: describeElement(windowElement),
-                    containsScheduleForm: !!windowElement.querySelector('.form-schedule'),
-                    looksLikeCabinetWindow: isCabinetPickerWindow(windowElement)
-                };
-            })
-        };
-    };
-
-    const setUrgentCheckboxesInSchedule = async () => {
-        const scheduleForm = findScheduleForm();
-        if (!scheduleForm) {
-            debugLog('urgent:no_schedule');
-            return { selected: 0, total: 0 };
-        }
-
-        const urgentCheckboxes = findUrgentCheckboxesInSchedule(scheduleForm);
-        let selected = 0;
-        console.log(`Подбор времени: найдено чек-боксов "Срочно": ${urgentCheckboxes.length}`);
-        debugLog('urgent:start', {
-            urgentCount: urgentCheckboxes.length,
-            checkboxes: urgentCheckboxes.map((checkbox) => ({
-                checkbox: describeElement(checkbox),
-                checked: checkbox.checked
-            }))
-        });
-
-        for (const checkbox of urgentCheckboxes) {
-            if (!checkbox.isConnected || !isVisible(checkbox)) {
-                debugLog('urgent:skip_not_visible', { checkbox: describeElement(checkbox) });
-                continue;
-            }
-
-            if (!checkbox.checked) {
-                debugLog('urgent:click', { checkbox: describeElement(checkbox) });
-                clickCheckboxLikeUser(checkbox);
-                await waitForBarsToProcessSelection();
-            }
-
-            if (checkbox.checked) {
-                selected++;
-            }
-        }
-
-        debugLog('urgent:done', { selected, total: urgentCheckboxes.length });
-        return { selected, total: urgentCheckboxes.length };
-    };
-
-    const waitForScheduleReady = async () => {
-        const startedAt = Date.now();
-        let lastKey = '';
-        let stableSince = Date.now();
-        let lastReady = null;
-
-        debugLog('schedule_ready:wait_start');
-
-        while (Date.now() - startedAt < 25000) {
-            const scheduleForm = findScheduleForm();
-            if (!scheduleForm) {
-                await sleep(250);
-                continue;
-            }
-
-            const guideCount = getScheduleCabinetGuideButtons(scheduleForm).length;
-            const urgentCount = findUrgentCheckboxesInSchedule(scheduleForm).length;
-            const key = `${guideCount}:${urgentCount}`;
-
-            if (guideCount > 0 && (!shouldMarkUrgent || urgentCount > 0)) {
-                lastReady = { scheduleForm, guideCount, urgentCount };
-
-                if (key !== lastKey) {
-                    lastKey = key;
-                    stableSince = Date.now();
-                    debugLog('schedule_ready:counts_changed', { guideCount, urgentCount });
-                }
-
-                if (Date.now() - stableSince >= 1200) {
-                    debugLog('schedule_ready:ready', { guideCount, urgentCount, snapshot: getScheduleDebugSnapshot() });
-                    return lastReady;
-                }
-            } else {
-                lastKey = key;
-                stableSince = Date.now();
-            }
-
-            await sleep(250);
-        }
-
-        debugLog('schedule_ready:timeout', {
-            lastReady: lastReady ? {
-                guideCount: lastReady.guideCount,
-                urgentCount: lastReady.urgentCount
-            } : null,
-            snapshot: getScheduleDebugSnapshot()
-        });
-        return lastReady;
-    };
-
-    const prepareScheduleForAssignment = async () => {
-        await sleep(600);
-
-        const scheduleOpened = await clickAssignButton();
-        if (!scheduleOpened) {
-            return 'подбор времени не открыт';
-        }
-
-        const scheduleReady = await waitForScheduleReady();
-        if (!scheduleReady) {
-            console.warn('Окно подбора времени открылось, но строки таблицы не загрузились.');
-            return 'подбор времени открыт, но строки не найдены';
-        }
-
-        console.log(`Подбор времени готов: кнопок кабинета ${scheduleReady.guideCount}, чек-боксов "Срочно" ${scheduleReady.urgentCount}.`);
-        await sleep(300);
-
-        const cabinetsResult = await chooseCabinetsInSchedule();
-        await sleep(500);
-        if (cabinetsResult.stopped) {
-            const resultMessage = `кабинеты: ${cabinetsResult.selected}/${cabinetsResult.total}, срочно: пропущено из-за незакрытого окна кабинетов`;
-            debugLog('schedule:stopped_after_cabinets', { resultMessage, snapshot: getScheduleDebugSnapshot() });
-            console.warn(`Подбор времени остановлен (${resultMessage}). Кнопка "Записать" не нажималась.`);
-            return `подбор времени остановлен (${resultMessage})`;
-        }
-
-        const urgentResult = shouldMarkUrgent
-            ? await setUrgentCheckboxesInSchedule()
-            : { selected: 0, total: 0, skipped: true };
-        const resultMessage = [
-            `кабинеты: ${cabinetsResult.selected}/${cabinetsResult.total}`,
-            urgentResult.skipped ? 'срочно: пропущено' : `срочно: ${urgentResult.selected}/${urgentResult.total}`
-        ].join(', ');
-
-        console.log(`Подбор времени подготовлен (${resultMessage}). Кнопка "Записать" не нажималась.`);
-        return `подбор времени подготовлен (${resultMessage})`;
-    };
-    
-    await openAllResearches();
-
-    // Проверяем количество чек-боксов
-    let allCheckboxes = getCheckboxes();
-    console.log(`Найдено чек-боксов: ${allCheckboxes.length}`);
-
-    const pageSizeResult = await trySetPageSizeTo150();
-    if (pageSizeResult.changed) {
-        console.log(`Количество записей автоматически переключено на ${TARGET_PAGE_SIZE}. Текущих чек-боксов: ${pageSizeResult.count}`);
-        allCheckboxes = getCheckboxes();
-    } else if (pageSizeResult.reason === 'not_found') {
-        console.warn('Не удалось автоматически найти переключатель количества записей.');
-    }
-    
-    // Если найдено меньше 100 записей, показываем предупреждение
-    if (allCheckboxes.length < 100) {
-        const warningMsg = `⚠️ Внимание! Найдено только ${allCheckboxes.length} анализов. Автоматически выставить 150 записей не удалось. Установите отображение 150 записей вручную (нажмите на цифру в правом нижнем углу, введите 150 и нажмите Enter).`;
-        console.warn(warningMsg);
-        
-        // Показываем предупреждение на странице
-        const notification = document.createElement('div');
-        notification.textContent = warningMsg;
-        notification.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #ff9800;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-family: 'Segoe UI', sans-serif;
-            z-index: 9999;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            max-width: 350px;
-        `;
-        document.body.appendChild(notification);
-        setTimeout(() => notification.remove(), 8000);
-    }
-    
-    const targetItemValues = allCheckboxes
-        .map((checkbox) => checkbox.getAttribute('item_value'))
-        .filter((itemValue) => itemValue && formData.hasOwnProperty(itemValue));
-
-    // Проставляем чек-боксы последовательно, чтобы БАРС успевал обновить нижний список выбранных исследований.
-    for (const itemValue of targetItemValues) {
-        const shouldBeChecked = formData[itemValue];
-
-        if (shouldBeChecked === true) {
-            const isSelected = await resyncSelectedCheckboxThroughBars(itemValue);
-            if (!isSelected) {
-                console.warn(`Не удалось отметить анализ: ${itemValue}`);
-                continue;
-            }
-            filledCount++;
-            console.log(`✓ Отмечен анализ: ${itemValue}`);
-        } else if (shouldBeChecked === false) {
-            const isCleared = await setCheckboxStateThroughBars(itemValue, false);
-            if (!isCleared) {
-                console.warn(`Не удалось снять анализ: ${itemValue}`);
-                continue;
-            }
-            filledCount++;
-            console.log(`✗ Снят анализ: ${itemValue}`);
-        }
-    }
-
-    let scheduleMessage = '';
-    if (normalizedAssignmentStage === ASSIGNMENT_STAGE_ANALYSES) {
-        scheduleMessage = 'остановлено после выбора анализов';
-        debugLog('schedule:skipped_by_setting', { assignmentStage: normalizedAssignmentStage });
-        console.log('Настройка сценария: остановка после выбора анализов. Кнопку "Назначить" не нажимаю.');
-    } else if (filledCount > 0) {
-        scheduleMessage = await prepareScheduleForAssignment();
-    } else {
-        console.warn('Анализы не были обработаны, кнопку "Назначить" не нажимаю.');
-    }
-    
-    const message = `Профиль "${profileName}": обработано ${filledCount} анализов (всего на странице: ${allCheckboxes.length})${scheduleMessage ? `. ${scheduleMessage}` : ''}`;
-    console.log(message);
-    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    
-    // Показываем уведомление о результате
-    const notification = document.createElement('div');
-    const isFullList = allCheckboxes.length >= 100;
-    notification.textContent = isFullList ? `✅ ${message}` : `⚠️ ${message}\n⚠️ Для полного списка установите 150 записей!`;
-    notification.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: ${isFullList ? '#4CAF50' : '#ff9800'};
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        font-size: 14px;
-        font-family: 'Segoe UI', sans-serif;
-        z-index: 9999;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        animation: fadeOut 5s ease-in-out forwards;
-        max-width: 350px;
-    `;
-    
-    const style = document.createElement('style');
-    style.textContent = `@keyframes fadeOut {0%{opacity:1}70%{opacity:1}100%{opacity:0;visibility:hidden}}`;
-    document.head.appendChild(style);
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 5000);
-    
-    return { message, filledCount, totalFound: allCheckboxes.length };
-}

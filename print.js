@@ -98,23 +98,30 @@ function appendMedicationRows(medications, appointmentDate) {
     body.appendChild(controlRow);
 }
 
-function appendAnalysisRows(analyses, appointmentDate) {
+function appendAnalysisRows(analyses, procedures, appointmentDate) {
     const body = document.getElementById('analysisRows');
     body.textContent = '';
 
+    const interventions = [
+        ...analyses.map((analysis) => analysis.name || `Исследование ${analysis.id}`),
+        ...procedures.map((procedure) => [procedure?.name, procedure?.comment]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .join(' — '))
+    ].filter(Boolean);
     const minRows = 28;
-    const rows = Math.max(minRows, analyses.length);
+    const rows = Math.max(minRows, interventions.length);
 
     for (let index = 0; index < rows; index += 1) {
         const row = document.createElement('tr');
-        const analysis = analyses[index];
+        const intervention = interventions[index];
 
         const nameCell = document.createElement('td');
-        nameCell.textContent = analysis ? analysis.name || `Исследование ${analysis.id}` : '';
+        nameCell.textContent = intervention || '';
         row.appendChild(nameCell);
 
         const dateCell = document.createElement('td');
-        dateCell.textContent = analysis ? appointmentDate : '';
+        dateCell.textContent = intervention ? appointmentDate : '';
         row.appendChild(dateCell);
 
         row.appendChild(document.createElement('td'));
@@ -137,7 +144,11 @@ function render(payload) {
     setText('patientBirthDate', formatDate(patient.birthDate));
 
     appendMedicationRows(Array.isArray(payload.medications) ? payload.medications : [], appointmentDate);
-    appendAnalysisRows(Array.isArray(payload.analyses) ? payload.analyses : [], appointmentDate);
+    appendAnalysisRows(
+        Array.isArray(payload.analyses) ? payload.analyses : [],
+        Array.isArray(payload.procedures) ? payload.procedures : [],
+        appointmentDate
+    );
 }
 
 document.addEventListener('DOMContentLoaded', () => {
