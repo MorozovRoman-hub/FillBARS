@@ -7,7 +7,9 @@ const { pathToFileURL } = require('url');
 const fixtureNames = [
     'dform-runtime-fixture.html',
     'research-order-fixture.html',
-    'schedule-fixture.html'
+    'schedule-fixture.html',
+    'transfusion-fixture.html',
+    'blood-request-fixture.html'
 ];
 const browserCandidates = [
     process.env.CHROME_PATH,

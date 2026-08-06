@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.1.11';
+const EXTENSION_VERSION = '5.1.14';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -22,6 +22,8 @@ const DIAGNOSTIC_MESSAGE_NAMESPACE = 'fillbars-diagnostics-v1';
 const MAX_DIAGNOSTIC_RUNS = 12;
 const MAX_DIAGNOSTIC_EVENTS = 220;
 const TEMP_PRINT_PAYLOAD_PREFIX = 'barsPrintPayload:';
+const TEMP_TRANSFUSION_PAYLOAD_PREFIX = 'barsTransfusionPayload:';
+const TEMP_BLOOD_REQUEST_PAYLOAD_PREFIX = 'barsBloodRequestPayload:';
 const JOURNAL_DB_NAME = 'FillBARSAssignments';
 const JOURNAL_DB_VERSION = 1;
 const JOURNAL_STORE_NAME = 'assignments';
@@ -1205,6 +1207,10 @@ function getPatientPrintFields(patientData = {}) {
     return {
         fullName: sanitizePulledFullName(patientData.fullName),
         birthDate: normalizeDateForInput(patientData.birthDate),
+        historyNumber: sanitizePatientHistoryNumber(patientData.historyNumber || patientData.medicalCardNumber),
+        department: sanitizePatientDepartment(patientData.department),
+        medicalOrganization: sanitizeMedicalOrganization(patientData.medicalOrganization),
+        doctorName: formatDoctorName(patientData.doctorName),
         appointmentDate: document.getElementById('appointmentDate')?.value || new Date().toISOString().slice(0, 10)
     };
 }
@@ -1238,7 +1244,7 @@ function sanitizePulledFullName(value) {
         return '';
     }
 
-    const words = rawValue.match(/[А-ЯЁ][а-яё-]+/g) || [];
+    const words = rawValue.match(/[А-ЯЁ][А-ЯЁа-яё-]+/g) || [];
     if (words.length >= 2) {
         return words.slice(-3).join(' ');
     }
@@ -1246,8 +1252,83 @@ function sanitizePulledFullName(value) {
     return '';
 }
 
+function sanitizePatientHistoryNumber(value) {
+    const normalized = String(value || '')
+        .replace(/^(?:иб|история\s+болезни|номер\s+иб|№\s*иб)\s*[:№-]?\s*/i, '')
+        .replace(/^хо2\s+амурск[_\s-]*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!normalized || normalized.length > 80 || /[{}();=<>]/.test(normalized)) {
+        return '';
+    }
+
+    return /\d/.test(normalized) ? normalized : '';
+}
+
+function sanitizePatientDepartment(value) {
+    const normalized = String(value || '')
+        .replace(/\s+/g, ' ')
+        .replace(/[_\s-]+$/, '')
+        .trim();
+
+    if (!normalized
+        || normalized.length > 60
+        || !/[А-ЯЁA-Z]/i.test(normalized)
+        || /[{}();=<>]/.test(normalized)) {
+        return '';
+    }
+
+    return normalized;
+}
+
+function sanitizeMedicalOrganization(value) {
+    const normalized = String(value || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!normalized
+        || normalized.length > 250
+        || !/[А-ЯЁA-Z]/i.test(normalized)
+        || /[{}=<>]/.test(normalized)) {
+        return '';
+    }
+
+    return normalized;
+}
+
+function formatDoctorName(value) {
+    const normalized = String(value || '')
+        .replace(/\s*\([^)]*\)\s*$/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const titleCase = (word) => {
+        const lower = word.toLocaleLowerCase('ru-RU');
+        return lower.charAt(0).toLocaleUpperCase('ru-RU') + lower.slice(1);
+    };
+    const abbreviated = normalized.match(/^([А-ЯЁA-Z][А-ЯЁа-яёA-Z-]+)\s+([А-ЯЁA-Z])\.?\s*([А-ЯЁA-Z])\.?$/i);
+    if (abbreviated) {
+        return `${titleCase(abbreviated[1])} ${abbreviated[2].toLocaleUpperCase('ru-RU')}.${abbreviated[3].toLocaleUpperCase('ru-RU')}.`;
+    }
+
+    const words = normalized.match(/[А-ЯЁA-Z][А-ЯЁа-яёA-Z-]*/gi) || [];
+    if (words.length < 2) {
+        return '';
+    }
+
+    const surname = titleCase(words[0]);
+    const initials = words.slice(1, 3)
+        .map((word) => `${word.charAt(0).toLocaleUpperCase('ru-RU')}.`)
+        .join('');
+    return `${surname} ${initials}`;
+}
+
 function scorePulledPatientData(data = {}) {
     const medicalCardNumber = String(data.medicalCardNumber || '').trim();
+    const historyNumber = sanitizePatientHistoryNumber(data.historyNumber);
+    const department = sanitizePatientDepartment(data.department);
+    const medicalOrganization = sanitizeMedicalOrganization(data.medicalOrganization);
+    const doctorName = formatDoctorName(data.doctorName);
     const fullName = String(data.fullName || '').trim();
     const birthDate = normalizeDateForInput(data.birthDate);
     let score = 0;
@@ -1256,7 +1337,23 @@ function scorePulledPatientData(data = {}) {
         score += 3;
     }
 
-    if (/^[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+){1,3}$/.test(fullName)) {
+    if (historyNumber) {
+        score += 4;
+    }
+
+    if (department) {
+        score += 1;
+    }
+
+    if (medicalOrganization) {
+        score += 1;
+    }
+
+    if (doctorName) {
+        score += 1;
+    }
+
+    if (/^[А-ЯЁ][А-ЯЁа-яё-]+(?:\s+[А-ЯЁ][А-ЯЁа-яё-]+){1,3}$/.test(fullName)) {
         score += 4;
     }
 
@@ -1285,10 +1382,26 @@ function pickBestPatientData(results = []) {
         .map((data) => String(data.medicalCardNumber || '').trim())
         .filter((value) => /^\d{6,}$/.test(value))
         .sort((left, right) => right.length - left.length)[0] || '';
+    const historyNumber = payloads
+        .map((data) => sanitizePatientHistoryNumber(data.historyNumber))
+        .find(Boolean) || '';
+    const department = payloads
+        .map((data) => sanitizePatientDepartment(data.department))
+        .find(Boolean) || '';
+    const medicalOrganization = payloads
+        .map((data) => sanitizeMedicalOrganization(data.medicalOrganization))
+        .find(Boolean) || '';
+    const doctorName = payloads
+        .map((data) => formatDoctorName(data.doctorName))
+        .find(Boolean) || '';
 
-    if (fullName || birthDate || medicalCardNumber) {
+    if (fullName || birthDate || historyNumber || medicalCardNumber || department || medicalOrganization || doctorName) {
         return {
             medicalCardNumber,
+            historyNumber,
+            department,
+            medicalOrganization,
+            doctorName,
             fullName,
             birthDate
         };
@@ -1307,6 +1420,7 @@ function getPatientDataFromActiveBarsPage() {
 
             chrome.scripting.executeScript({
                 target: { tabId: tabs[0].id, allFrames: true },
+                world: 'MAIN',
                 func: readPatientDataFromBarsPage
             }, (results) => {
                 if (chrome.runtime.lastError) {
@@ -1344,6 +1458,80 @@ function openPrintPayload(payload) {
     });
 }
 
+function openTransfusionPayload(payload) {
+    const key = `${TEMP_TRANSFUSION_PAYLOAD_PREFIX}${generateId('transfusion')}`;
+    localStorage.setItem(key, JSON.stringify(payload));
+    chrome.tabs.create({
+        url: chrome.runtime.getURL(`transfusion.html?payload=${encodeURIComponent(key)}`)
+    });
+}
+
+function openBloodRequestPayload(payload) {
+    const key = `${TEMP_BLOOD_REQUEST_PAYLOAD_PREFIX}${generateId('blood-request')}`;
+    localStorage.setItem(key, JSON.stringify(payload));
+    chrome.tabs.create({
+        url: chrome.runtime.getURL(`blood-request.html?payload=${encodeURIComponent(key)}`)
+    });
+}
+
+async function openBloodRequest() {
+    const button = document.getElementById('openBloodRequest');
+    button.disabled = true;
+    setStatus('⏳ Получаю данные пациента из истории болезни БАРС...', '#ff9800');
+
+    try {
+        const patientData = await getPatientDataFromActiveBarsPage();
+        const patient = getPatientPrintFields(patientData);
+        openBloodRequestPayload({
+            generatedAt: new Date().toISOString(),
+            patient
+        });
+
+        const missing = [
+            patient.fullName ? '' : 'ФИО',
+            patient.historyNumber ? '' : 'номер истории болезни',
+            patient.birthDate ? '' : 'дата рождения'
+        ].filter(Boolean);
+        setStatus(missing.length
+            ? `⚠️ Заявка открыта, не найдено: ${missing.join(', ')}`
+            : '✅ Заявка на компоненты крови открыта');
+    } catch (error) {
+        console.error('Не удалось получить данные пациента из БАРС', error);
+        setStatus(`❌ Не удалось открыть заявку: ${error.message}`, '#f44336');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function openTransfusionProtocol() {
+    const button = document.getElementById('openTransfusionProtocol');
+    button.disabled = true;
+    setStatus('⏳ Получаю данные пациента из истории болезни БАРС...', '#ff9800');
+
+    try {
+        const patientData = await getPatientDataFromActiveBarsPage();
+        const patient = getPatientPrintFields(patientData);
+        openTransfusionPayload({
+            generatedAt: new Date().toISOString(),
+            patient
+        });
+
+        const missing = [
+            patient.fullName ? '' : 'ФИО',
+            patient.historyNumber ? '' : 'номер истории болезни',
+            patient.birthDate ? '' : 'дата рождения'
+        ].filter(Boolean);
+        setStatus(missing.length
+            ? `⚠️ Протокол открыт, не найдено: ${missing.join(', ')}`
+            : '✅ Протокол трансфузии открыт');
+    } catch (error) {
+        console.error('Не удалось получить данные пациента из БАРС', error);
+        setStatus(`❌ Не удалось открыть протокол: ${error.message}`, '#f44336');
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function openPrintSheetForSelectedProfile() {
     const profileName = getSelectedProfileName();
     if (!profileName || !PROFILES[profileName]) {
@@ -1353,7 +1541,7 @@ async function openPrintSheetForSelectedProfile() {
 
     const button = document.getElementById('openPrintSheet');
     button.disabled = true;
-    setStatus('⏳ Получаю ФИО и дату рождения из БАРС...', '#ff9800');
+    setStatus('⏳ Получаю ФИО, дату рождения и номер истории из БАРС...', '#ff9800');
 
     try {
         const patientData = await getPatientDataFromActiveBarsPage();
@@ -1370,6 +1558,7 @@ async function openPrintSheetForSelectedProfile() {
 
         const missing = [
             patient.fullName ? '' : 'ФИО',
+            patient.historyNumber ? '' : 'номер истории болезни',
             patient.birthDate ? '' : 'дата рождения'
         ].filter(Boolean);
         setStatus(missing.length
@@ -1525,6 +1714,89 @@ function readPatientDataFromBarsPage() {
             && style.visibility !== 'hidden'
             && style.display !== 'none';
     };
+    const historyForms = Array.from(document.querySelectorAll('.hosp_history_new'))
+        .filter(isVisible);
+    const historyForm = historyForms.at(-1) || null;
+    const historyPage = historyForm?.form?.page
+        || historyForm?.jsParent?.page
+        || historyForm?.DForm?.page
+        || null;
+    const getHistoryCaption = (name) => {
+        if (!historyForm) {
+            return '';
+        }
+
+        try {
+            if (typeof historyPage?.getCaption === 'function') {
+                return cleanValue(historyPage.getCaption(name));
+            }
+        } catch (error) {
+            // The exact legacy page exists but is still initializing.
+        }
+
+        try {
+            if (typeof getCaption === 'function') {
+                return cleanValue(getCaption(name));
+            }
+        } catch (error) {
+            // Fall through to DOM/text compatibility paths below.
+        }
+
+        return '';
+    };
+    const getUserEnvironmentValue = (label) => {
+        const normalizedLabel = String(label || '').replace(/\s+/g, ' ').replace(/:$/, '').trim().toLowerCase();
+        const profileSection = Array.from(document.querySelectorAll('#Profile .info > section'))
+            .find((section) => cleanValue(section.querySelector('.title')?.textContent)
+                .replace(/:$/, '')
+                .toLowerCase() === normalizedLabel);
+        const profileValue = cleanValue(profileSection?.querySelector('.info')?.textContent);
+        if (profileValue) {
+            return profileValue;
+        }
+
+        const legacyRow = Array.from(document.querySelectorAll('#sys_user_data tr'))
+            .find((row) => Array.from(row.querySelectorAll('.td_name'))
+                .some((cell) => cleanValue(cell.textContent)
+                    .replace(/:$/, '')
+                    .toLowerCase() === normalizedLabel));
+        return cleanValue(legacyRow?.querySelector('.td_user')?.textContent);
+    };
+    const getCurrentDoctorName = () => {
+        const profileName = cleanValue(document.querySelector('#Profile .user .name, #Profile .name')?.textContent);
+        if (profileName) {
+            return profileName.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        }
+
+        const legacyName = getUserEnvironmentValue('Пользователь');
+        if (legacyName) {
+            return legacyName.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        }
+
+        try {
+            if (typeof getVar === 'function') {
+                return cleanValue(getVar('EMP_NAME')).replace(/\s*\([^)]*\)\s*$/, '').trim();
+            }
+        } catch (error) {
+            // DOM profile remains the primary source for both BARS themes.
+        }
+        return '';
+    };
+    const getCurrentMedicalOrganization = () => {
+        const profileOrganization = getUserEnvironmentValue('ЛПУ');
+        if (profileOrganization) {
+            return profileOrganization;
+        }
+
+        try {
+            if (typeof getVar === 'function') {
+                return cleanValue(getVar('LPU_NAME'));
+            }
+        } catch (error) {
+            // The global LPU caption is unavailable in some BARS builds.
+        }
+        return '';
+    };
     const getCaptionValues = (caption) => Array.from(document.querySelectorAll(`[data="caption:${caption}"]`))
         .map((element) => ({
             value: cleanValue(element.value || element.innerText || element.textContent || ''),
@@ -1548,6 +1820,35 @@ function readPatientDataFromBarsPage() {
         const match = String(value || '').match(/\b\d{6,}\b/);
         return match ? match[0] : '';
     };
+    const normalizeHistoryNumber = (value) => {
+        const normalized = cleanValue(value)
+            .replace(/^(?:иб|история\s+болезни|номер\s+иб|№\s*иб)\s*[:№-]?\s*/i, '')
+            .trim();
+        return normalized
+            && normalized.length <= 80
+            && /\d/.test(normalized)
+            && !/[{}();=<>]/.test(normalized)
+            ? normalized
+            : '';
+    };
+    const extractDepartmentFromHistoryNumber = (value) => {
+        const normalized = cleanValue(value)
+            .replace(/^(?:иб|история\s+болезни|номер\s+иб|№\s*иб)\s*[:№-]?\s*/i, '')
+            .trim();
+        const separatorIndex = normalized.indexOf('_');
+        if (separatorIndex < 2 || separatorIndex > 60) {
+            return '';
+        }
+
+        const department = normalized.slice(0, separatorIndex)
+            .replace(/\s+/g, ' ')
+            .trim();
+        return department
+            && /[А-ЯЁA-Z]/i.test(department)
+            && !/[{}();=<>]/.test(department)
+            ? department
+            : '';
+    };
     const normalizeFullName = (value) => {
         const cleaned = cleanValue(value)
             .replace(/\s*,.*$/, '')
@@ -1558,12 +1859,12 @@ function readPatientDataFromBarsPage() {
             return '';
         }
 
-        const words = cleaned.match(/[А-ЯЁ][а-яё-]+/g) || [];
+        const words = cleaned.match(/[А-ЯЁ][А-ЯЁа-яё-]+/g) || [];
         if (words.length >= 2 && words.length <= 4) {
             return words.join(' ');
         }
 
-        const match = cleaned.match(/\b[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+){1,3}\b/);
+        const match = cleaned.match(/\b[А-ЯЁ][А-ЯЁа-яё-]+(?:\s+[А-ЯЁ][А-ЯЁа-яё-]+){1,3}\b/);
         return match ? match[0] : '';
     };
 
@@ -1658,6 +1959,11 @@ function readPatientDataFromBarsPage() {
     };
 
     const findFullName = () => {
+        const exactHistoryName = normalizeFullName(getHistoryCaption('PAT_FIO'));
+        if (exactHistoryName) {
+            return exactHistoryName;
+        }
+
         if (headerPatientData.fullName) {
             return headerPatientData.fullName;
         }
@@ -1699,6 +2005,12 @@ function readPatientDataFromBarsPage() {
     };
 
     const findBirthDate = () => {
+        const exactHistoryBirthDate = getHistoryCaption('PAT_BDATE')
+            .match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/);
+        if (exactHistoryBirthDate) {
+            return exactHistoryBirthDate[0];
+        }
+
         if (headerPatientData.birthDate) {
             return headerPatientData.birthDate;
         }
@@ -1724,8 +2036,47 @@ function readPatientDataFromBarsPage() {
         return nearbyDate?.[1] || '';
     };
 
+    const findHistoryNumber = () => {
+        const exactHistoryNumber = normalizeHistoryNumber(getHistoryCaption('HH_PREF_NUMB'));
+        if (exactHistoryNumber) {
+            return exactHistoryNumber;
+        }
+
+        const fromCaption = [
+            getCaptionValue('HH_PREF_NUMB'),
+            getCaptionValue('HH_NUMB')
+        ].map(normalizeHistoryNumber).find(Boolean);
+        if (fromCaption) {
+            return fromCaption;
+        }
+
+        const fromText = textAfterLabel([
+            'ИБ\\s*№',
+            '№\\s*ИБ',
+            'Номер\\s*ИБ',
+            'История\\s+болезни'
+        ]);
+        return normalizeHistoryNumber(fromText);
+    };
+
+    const findDepartment = () => {
+        const exactDepartment = extractDepartmentFromHistoryNumber(getHistoryCaption('HH_PREF_NUMB'));
+        if (exactDepartment) {
+            return exactDepartment;
+        }
+
+        return [
+            getCaptionValue('HH_PREF_NUMB'),
+            getCaptionValue('HH_NUMB')
+        ].map(extractDepartmentFromHistoryNumber).find(Boolean) || '';
+    };
+
     return {
         medicalCardNumber: findMedicalCardNumber(),
+        historyNumber: findHistoryNumber(),
+        department: findDepartment(),
+        medicalOrganization: getCurrentMedicalOrganization(),
+        doctorName: getCurrentDoctorName(),
         fullName: findFullName(),
         birthDate: findBirthDate()
     };
@@ -2829,6 +3180,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('journalEnabledCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('journalRetentionDays').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('openPrintSheet').addEventListener('click', openPrintSheetForSelectedProfile);
+    document.getElementById('openBloodRequest').addEventListener('click', openBloodRequest);
+    document.getElementById('openTransfusionProtocol').addEventListener('click', openTransfusionProtocol);
     document.getElementById('saveJournalEntry').addEventListener('click', () => {
         saveSelectedProfileToJournal().catch((error) => {
             console.error('Не удалось сохранить журнал назначений', error);

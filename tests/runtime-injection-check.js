@@ -11,12 +11,20 @@ const assert = (condition, message) => {
 
 const manifest = JSON.parse(read('manifest.json'));
 const popup = read('popup.js');
+const popupHtml = read('popup.html');
 const background = read('background.js');
 const adapter = read('bars-adapter.js');
 const runner = read('fill-runner.js');
+const printHtml = read('print.html');
+const transfusionHtml = read('transfusion.html');
+const transfusionJs = read('transfusion.js');
+const officeTemplatesJs = read('office-templates.js');
+const officeExportJs = read('office-export.js');
+const bloodRequestHtml = read('blood-request.html');
+const bloodRequestJs = read('blood-request.js');
 const version = manifest.version;
 
-assert(version === '5.1.11', `unexpected manifest version: ${version}`);
+assert(version === '5.1.14', `unexpected manifest version: ${version}`);
 assert(popup.includes(`const EXTENSION_VERSION = '${version}'`), 'popup version is not synchronized');
 assert(popup.includes('loadedManifestVersion !== EXTENSION_VERSION')
     && popup.includes('Загружена смешанная версия')
@@ -25,6 +33,108 @@ assert(popup.includes('loadedManifestVersion !== EXTENSION_VERSION')
 assert(adapter.includes(`const VERSION = '${version}'`), 'adapter version is not synchronized');
 assert(runner.includes(`const VERSION = '${version}'`), 'runner version is not synchronized');
 assert(runner.includes(`Версия: ${version}`), 'runner console banner is not synchronized');
+assert(popup.includes("document.querySelectorAll('.hosp_history_new')")
+    && popup.includes("world: 'MAIN'")
+    && popup.includes("historyPage?.getCaption")
+    && popup.includes("getHistoryCaption('PAT_FIO')")
+    && popup.includes("getHistoryCaption('PAT_BDATE')")
+    && popup.includes("getHistoryCaption('HH_PREF_NUMB')"),
+    'patient print data is not read from the exact hosp_history_new source controls');
+assert(printHtml.includes('id="patientHistoryNumber"')
+    && popup.includes('historyNumber: sanitizePatientHistoryNumber'),
+    'assignment sheet does not receive the hospital history number');
+const historySanitizerStart = popup.indexOf('function sanitizePatientHistoryNumber');
+const historySanitizerEnd = popup.indexOf('\nfunction scorePulledPatientData', historySanitizerStart);
+const historySanitizerSource = popup.slice(historySanitizerStart, historySanitizerEnd);
+const sanitizePatientHistoryNumber = Function(`${historySanitizerSource}; return sanitizePatientHistoryNumber;`)();
+assert(sanitizePatientHistoryNumber('ХО2 Амурск_1340014-70784/00765') === '1340014-70784/00765'
+    && sanitizePatientHistoryNumber('ИБ: ХО2 Амурск_1340014-70784/00765') === '1340014-70784/00765',
+    'hospital history number keeps the ХО2 Амурск_ service prefix');
+const departmentSanitizerStart = popup.indexOf('function sanitizePatientDepartment');
+const departmentSanitizerEnd = popup.indexOf('\nfunction scorePulledPatientData', departmentSanitizerStart);
+const departmentSanitizerSource = popup.slice(departmentSanitizerStart, departmentSanitizerEnd);
+const sanitizePatientDepartment = Function(`${departmentSanitizerSource}; return sanitizePatientDepartment;`)();
+assert(sanitizePatientDepartment('ХО2 Амурск_') === 'ХО2 Амурск'
+    && popup.includes("extractDepartmentFromHistoryNumber(getHistoryCaption('HH_PREF_NUMB'))")
+    && popup.includes('department: sanitizePatientDepartment(patientData.department)')
+    && transfusionJs.includes("setValue('department', patient.department)")
+    && bloodRequestJs.includes("setValue('department', patient.department)"),
+    'department is not derived from HH_PREF_NUMB for both transfusion documents');
+const doctorFormatterStart = popup.indexOf('function formatDoctorName');
+const doctorFormatterEnd = popup.indexOf('\nfunction scorePulledPatientData', doctorFormatterStart);
+const doctorFormatterSource = popup.slice(doctorFormatterStart, doctorFormatterEnd);
+const formatDoctorName = Function(`${doctorFormatterSource}; return formatDoctorName;`)();
+assert(formatDoctorName('Морозов Роман Владимирович') === 'Морозов Р.В.'
+    && formatDoctorName('МОРОЗОВ РОМАН ВЛАДИМИРОВИЧ (1234)') === 'Морозов Р.В.'
+    && formatDoctorName('Морозов Р.В.') === 'Морозов Р.В.',
+    'current BARS doctor is not normalized to Фамилия И.О.');
+assert(popup.includes("document.querySelectorAll('#Profile .info > section')")
+    && popup.includes("document.querySelectorAll('#sys_user_data tr')")
+    && popup.includes("row.querySelectorAll('.td_name')")
+    && popup.includes("legacyRow?.querySelector('.td_user')")
+    && !popup.includes(".td_name, td:first-child")
+    && popup.includes("getUserEnvironmentValue('ЛПУ')")
+    && popup.includes("getUserEnvironmentValue('Пользователь')")
+    && popup.includes("getVar('EMP_NAME')")
+    && popup.includes("getVar('LPU_NAME')")
+    && popup.includes('medicalOrganization: sanitizeMedicalOrganization(patientData.medicalOrganization)')
+    && popup.includes('doctorName: formatDoctorName(patientData.doctorName)'),
+    'BARS profile organization/doctor sources are not connected to the print payload');
+assert(popup.includes('openTransfusionProtocol')
+    && popup.includes('transfusion.html?payload=')
+    && transfusionHtml.includes('ПРОТОКОЛ ТРАНСФУЗИИ')
+    && transfusionHtml.includes('id="recipientAbo"')
+    && transfusionHtml.includes('id="recipientRh"')
+    && transfusionHtml.includes('id="indication"')
+    && transfusionHtml.includes('id="componentName"')
+    && transfusionHtml.includes('id="componentUnitNumber"')
+    && transfusionHtml.includes('id="componentVolume"')
+    && transfusionHtml.includes('Восполнение объема циркулирующих эритроцитов')
+    && transfusionHtml.includes('Восполнение факторов свертывания крови')
+    && !transfusionHtml.includes('indicationDetails')
+    && !transfusionHtml.includes('Уточнение показания')
+    && transfusionJs.includes("beforeBp: '110/70'")
+    && transfusionJs.includes("afterTwoHoursDiuresis: 'Свжел'")
+    && transfusionJs.includes('syncRecipientBloodGroup')
+    && transfusionJs.includes("setValue('selectionOrganization', patient.medicalOrganization)")
+    && transfusionJs.includes("setValue('transfusionDoctor', patient.doctorName)")
+    && transfusionHtml.includes('id="exportWordButton"')
+    && transfusionHtml.includes('id="exportExcelButton"')
+    && transfusionHtml.includes('office-templates.js?v=5.1.14')
+    && transfusionHtml.includes('office-export.js?v=5.1.14')
+    && transfusionJs.includes('buildExportValues')
+    && transfusionJs.includes('downloadDocx')
+    && transfusionJs.includes('downloadXlsx')
+    && officeTemplatesJs.includes('__FillBARSOfficeTemplates__')
+    && officeExportJs.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    && officeExportJs.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    && transfusionJs.includes('globalScope.__FillBARSTransfusionProtocol__'),
+    'interactive transfusion protocol contract is incomplete');
+const documentActionSplitStart = popupHtml.indexOf('class="document-action-split"');
+const documentActionSplitEnd = popupHtml.indexOf('</div>', documentActionSplitStart);
+const printSheetButton = popupHtml.indexOf('id="openPrintSheet"', documentActionSplitStart);
+const bloodRequestButton = popupHtml.indexOf('id="openBloodRequest"', documentActionSplitStart);
+const transfusionProtocolButton = popupHtml.indexOf('id="openTransfusionProtocol"', documentActionSplitStart);
+assert(documentActionSplitStart >= 0
+    && documentActionSplitEnd > documentActionSplitStart
+    && printSheetButton > documentActionSplitStart
+    && bloodRequestButton > printSheetButton
+    && transfusionProtocolButton > bloodRequestButton
+    && transfusionProtocolButton < documentActionSplitEnd
+    && popup.includes('openBloodRequest')
+    && popup.includes('blood-request.html?payload=')
+    && bloodRequestHtml.includes('ЗАЯВКА НА КОМПОНЕНТЫ КРОВИ')
+    && bloodRequestHtml.includes('(оборотная сторона)')
+    && bloodRequestHtml.includes('id="patientFullName"')
+    && bloodRequestHtml.includes('id="patientHistoryNumber"')
+    && bloodRequestHtml.includes('id="patientBirthDate"')
+    && bloodRequestHtml.includes('id="releasedBloodGroup1"')
+    && bloodRequestHtml.includes('id="requestDoctor"')
+    && bloodRequestJs.includes("setValue('requestDoctor', patient.doctorName)")
+    && bloodRequestJs.includes('calculateAge')
+    && bloodRequestJs.includes('syncReleasedBloodGroup')
+    && bloodRequestJs.includes('globalScope.__FillBARSBloodRequest__'),
+    'interactive blood request contract is incomplete');
 
 assert(popup.includes("files: ['fill-runner.js']"), 'runner is not injected as a file');
 assert(!/func\s*:\s*fillForm\b/.test(popup), 'large fillForm is still serialized through executeScript');
