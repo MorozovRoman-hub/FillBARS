@@ -142,6 +142,7 @@ function render(payload) {
 
     setText('patientFullName', patient.fullName);
     setText('patientBirthDate', formatDate(patient.birthDate));
+    setText('patientHistoryNumber', patient.historyNumber);
 
     appendMedicationRows(Array.isArray(payload.medications) ? payload.medications : [], appointmentDate);
     appendAnalysisRows(

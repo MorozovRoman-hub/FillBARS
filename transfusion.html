@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Протокол трансфузии</title>
+    <link rel="stylesheet" href="transfusion.css?v=5.1.14">
+</head>
+<body>
+    <div class="protocol-actions" aria-label="Действия с протоколом">
+        <button id="printButton" type="button">Печать</button>
+        <button id="exportWordButton" type="button">Скачать Word</button>
+        <button id="exportExcelButton" type="button">Скачать Excel</button>
+        <button id="clearButton" type="button">Очистить введённые данные</button>
+        <button id="closeButton" type="button">Закрыть</button>
+    </div>
+
+    <p id="payloadWarning" class="payload-warning hidden" role="status">
+        Данные пациента не получены. Поля можно заполнить вручную.
+    </p>
+
+    <main id="transfusionSheet" class="protocol-sheet">
+        <h1>ПРОТОКОЛ ТРАНСФУЗИИ</h1>
+
+        <section class="form-grid header-grid" aria-label="Данные пациента и трансфузии">
+            <label class="field span-6">
+                <span>Фамилия, имя, отчество реципиента</span>
+                <input id="patientFullName" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-3">
+                <span>Дата рождения</span>
+                <input id="patientBirthDate" data-user-field type="date">
+            </label>
+            <label class="field span-3">
+                <span>№ истории болезни</span>
+                <input id="patientHistoryNumber" data-user-field type="text" autocomplete="off">
+            </label>
+
+            <label class="field span-4">
+                <span>Отделение</span>
+                <input id="department" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-2">
+                <span>Дата заявки</span>
+                <input id="requestDate" data-user-field type="date">
+            </label>
+            <label class="field span-2">
+                <span>Время заявки</span>
+                <input id="requestTime" data-user-field type="time">
+            </label>
+            <label class="field span-2">
+                <span>Дата трансфузии</span>
+                <input id="transfusionDate" data-user-field type="date">
+            </label>
+            <label class="field span-1">
+                <span>Начало</span>
+                <input id="startTime" data-user-field type="time">
+            </label>
+            <label class="field span-1">
+                <span>Окончание</span>
+                <input id="endTime" data-user-field type="time">
+            </label>
+        </section>
+
+        <h2>Данные медицинского обследования реципиента</h2>
+        <section class="form-grid recipient-grid">
+            <label class="field span-3">
+                <span>Группа крови реципиента AB0</span>
+                <select id="recipientAbo" data-user-field>
+                    <option value=""></option>
+                    <option>O(I)</option>
+                    <option>A(II)</option>
+                    <option>B(III)</option>
+                    <option>AB(IV)</option>
+                    <option>Не определена</option>
+                </select>
+            </label>
+            <label class="field span-3">
+                <span>Резус-принадлежность</span>
+                <select id="recipientRh" data-user-field>
+                    <option value=""></option>
+                    <option>Rh(+)</option>
+                    <option>Rh(-)</option>
+                    <option>Не определена</option>
+                </select>
+            </label>
+            <label class="field span-3">
+                <span>Антигены C, c, E, e, K</span>
+                <input id="recipientAntigens" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-3">
+                <span>Аллоиммунные антитела</span>
+                <input id="recipientAntibodies" data-user-field type="text" autocomplete="off">
+            </label>
+        </section>
+
+        <h2>Показания к трансфузии</h2>
+        <section class="form-grid indication-grid">
+            <label class="field span-12">
+                <span>Основное показание</span>
+                <select id="indication" data-user-field>
+                    <option value=""></option>
+                    <option>Восполнение объема циркулирующих эритроцитов</option>
+                    <option>Восполнение факторов свертывания крови</option>
+                </select>
+                <output id="indicationPrintValue" class="print-select-value" aria-hidden="true"></output>
+            </label>
+        </section>
+
+        <h2>Анамнез реципиента</h2>
+        <section class="form-grid anamnesis-grid">
+            <label class="field span-4">
+                <span>Трансфузии компонентов крови в анамнезе</span>
+                <select id="previousTransfusions" data-user-field>
+                    <option value=""></option><option>Нет</option><option>Да</option><option>Неизвестно</option>
+                </select>
+            </label>
+            <label class="field span-4">
+                <span>Реакции и осложнения в анамнезе</span>
+                <select id="previousReactions" data-user-field>
+                    <option value=""></option><option>Нет</option><option>Да</option><option>Неизвестно</option>
+                </select>
+            </label>
+            <label class="field span-4">
+                <span>Трансфузии по индивидуальному подбору</span>
+                <select id="previousIndividualSelection" data-user-field>
+                    <option value=""></option><option>Нет</option><option>Да</option><option>Неизвестно</option>
+                </select>
+            </label>
+        </section>
+
+        <h2>Данные о донорской крови или её компоненте</h2>
+        <section class="form-grid donor-grid">
+            <label class="field span-4">
+                <span>Наименование компонента</span>
+                <select id="componentName" data-user-field>
+                    <option value=""></option>
+                    <option>Эритроцитсодержащий компонент</option>
+                    <option>Эритроцитарная взвесь</option>
+                    <option>Эритроцитарная масса</option>
+                    <option>Свежезамороженная плазма</option>
+                    <option>Концентрат тромбоцитов</option>
+                    <option>Криопреципитат</option>
+                    <option>Альбумин</option>
+                    <option>Другое</option>
+                </select>
+            </label>
+            <label class="field span-4">
+                <span>Уточнение компонента/среды</span>
+                <input id="componentDetails" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-4">
+                <span>Организация, осуществившая заготовку</span>
+                <input id="donorOrganization" data-user-field type="text" autocomplete="off">
+            </label>
+
+            <label class="field span-2">
+                <span>Группа крови донора AB0</span>
+                <select id="donorAbo" data-user-field>
+                    <option value=""></option><option>O(I)</option><option>A(II)</option><option>B(III)</option><option>AB(IV)</option><option>Не применимо</option>
+                </select>
+            </label>
+            <label class="field span-2">
+                <span>Резус донора</span>
+                <select id="donorRh" data-user-field>
+                    <option value=""></option><option>Rh(+)</option><option>Rh(-)</option><option>Не применимо</option>
+                </select>
+            </label>
+            <label class="field span-3">
+                <span>Антигены эритроцитов донора</span>
+                <input id="donorAntigens" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-3">
+                <span>№ единицы компонента крови</span>
+                <input id="componentUnitNumber" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-2">
+                <span>Количество, мл</span>
+                <input id="componentVolume" data-user-field type="number" min="0" step="1">
+            </label>
+
+            <label class="field span-3">
+                <span>Дата заготовки</span>
+                <input id="collectionDate" data-user-field type="date">
+            </label>
+            <label class="field span-3">
+                <span>Срок годности</span>
+                <input id="expirationDate" data-user-field type="date">
+            </label>
+            <label class="field span-6">
+                <span>Дополнительные сведения о переливаемой среде</span>
+                <input id="componentNotes" data-user-field type="text" autocomplete="off">
+            </label>
+        </section>
+
+        <h2>Результаты индивидуального подбора</h2>
+        <section class="form-grid compatibility-grid">
+            <label class="field span-5">
+                <span>Медицинская организация</span>
+                <input id="selectionOrganization" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-2">
+                <span>Дата исследования</span>
+                <input id="selectionDate" data-user-field type="date">
+            </label>
+            <label class="field span-3">
+                <span>Ответственное лицо</span>
+                <input id="selectionResponsible" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-2">
+                <span>Заключение</span>
+                <select id="selectionConclusion" data-user-field>
+                    <option value=""></option><option>Совместимо</option><option>Несовместимо</option><option>Не проводилось</option>
+                </select>
+            </label>
+        </section>
+
+        <h2>Пробы на индивидуальную совместимость в отделении</h2>
+        <section class="form-grid test-grid">
+            <label class="field span-3">
+                <span>Наименование реагента</span>
+                <input id="reagentName" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-2">
+                <span>Серия реагента</span>
+                <input id="reagentSeries" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-2">
+                <span>Срок годности</span>
+                <input id="reagentExpiration" data-user-field type="date">
+            </label>
+            <label class="field span-2">
+                <span>На плоскости</span>
+                <select id="planeTest" data-user-field>
+                    <option value=""></option><option>Совместимо</option><option>Несовместимо</option><option>Не проводилось</option>
+                </select>
+            </label>
+            <label class="field span-3">
+                <span>Биологическая проба</span>
+                <select id="biologicalTest" data-user-field>
+                    <option value=""></option><option>Совместимо</option><option>Несовместимо</option><option>Отрицательная</option><option>Положительная</option>
+                </select>
+            </label>
+        </section>
+
+        <h2>Реакции и осложнения</h2>
+        <section class="form-grid reaction-grid">
+            <label class="field span-8">
+                <span>Основные симптомы</span>
+                <input id="reactionSymptoms" data-user-field type="text" autocomplete="off">
+            </label>
+            <label class="field span-4">
+                <span>Степень тяжести</span>
+                <select id="reactionSeverity" data-user-field>
+                    <option value=""></option><option>Нет реакции</option><option>Лёгкая</option><option>Средняя</option><option>Тяжёлая</option>
+                </select>
+            </label>
+        </section>
+
+        <h2>Наблюдение за состоянием реципиента</h2>
+        <table class="observation-table">
+            <thead>
+                <tr>
+                    <th>Этап наблюдения</th>
+                    <th>АД, мм рт. ст.</th>
+                    <th>Пульс, уд/мин</th>
+                    <th>Температура, °C</th>
+                    <th>Диурез, цвет мочи</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th>Перед началом переливания</th>
+                    <td><input id="beforeBp" data-user-field type="text" inputmode="numeric"></td>
+                    <td><input id="beforePulse" data-user-field type="number" min="0"></td>
+                    <td><input id="beforeTemperature" data-user-field type="text" inputmode="decimal"></td>
+                    <td><input id="beforeDiuresis" data-user-field type="text"></td>
+                </tr>
+                <tr>
+                    <th>Через 1 час после переливания</th>
+                    <td><input id="afterOneHourBp" data-user-field type="text" inputmode="numeric"></td>
+                    <td><input id="afterOneHourPulse" data-user-field type="number" min="0"></td>
+                    <td><input id="afterOneHourTemperature" data-user-field type="text" inputmode="decimal"></td>
+                    <td><input id="afterOneHourDiuresis" data-user-field type="text"></td>
+                </tr>
+                <tr>
+                    <th>Через 2 часа после переливания</th>
+                    <td><input id="afterTwoHoursBp" data-user-field type="text" inputmode="numeric"></td>
+                    <td><input id="afterTwoHoursPulse" data-user-field type="number" min="0"></td>
+                    <td><input id="afterTwoHoursTemperature" data-user-field type="text" inputmode="decimal"></td>
+                    <td><input id="afterTwoHoursDiuresis" data-user-field type="text"></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <label class="doctor-field">
+            <span>Врач, осуществивший трансфузию</span>
+            <input id="transfusionDoctor" data-user-field type="text" autocomplete="off">
+        </label>
+    </main>
+
+    <script src="office-templates.js?v=5.1.14"></script>
+    <script src="office-export.js?v=5.1.14"></script>
+    <script src="transfusion.js?v=5.1.14"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# Local reference documents and visual QA output may contain patient data.
+tests/fixtures/*.docx
+tests/artifacts/

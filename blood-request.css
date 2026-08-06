@@ -1,0 +1,240 @@
+@page {
+    size: A4 portrait;
+    margin: 12mm 14mm;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: #e7edf3;
+    color: #000;
+    font-family: "Times New Roman", Times, serif;
+}
+
+.request-actions {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    background: #263746;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .16);
+}
+
+.request-actions button {
+    min-width: 150px;
+    padding: 9px 14px;
+    border: 0;
+    border-radius: 4px;
+    background: #fff;
+    color: #162330;
+    font: 700 14px Arial, sans-serif;
+    cursor: pointer;
+}
+
+.payload-warning {
+    width: 182mm;
+    margin: 12px auto -5px;
+    padding: 8px 12px;
+    border: 1px solid #d69e2e;
+    background: #fff8db;
+    color: #6c4b00;
+    font: 13px Arial, sans-serif;
+}
+
+.hidden, .print-select-value { display: none; }
+
+.request-sheet {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 14px auto;
+    padding: 16mm 20mm;
+    background: #fff;
+    box-shadow: 0 0 14px rgba(0, 0, 0, .14);
+    font-size: 12.5pt;
+    line-height: 1.15;
+}
+
+h1 {
+    margin: 0 0 9mm;
+    text-align: center;
+    font-size: 16pt;
+    font-style: italic;
+    letter-spacing: .4px;
+}
+
+h2 {
+    margin: 8mm 0 2mm;
+    font-size: 14pt;
+}
+
+.request-front h1 {
+    margin-bottom: 7mm;
+}
+
+input, select, textarea {
+    min-width: 0;
+    border: 0;
+    border-bottom: .7px solid #000;
+    border-radius: 0;
+    background: transparent;
+    color: #000;
+    font: 700 11.5pt/1.1 "Times New Roman", Times, serif;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: 2px solid #5a96d6;
+    background: #f3f8ff;
+}
+
+.line-field {
+    display: flex;
+    align-items: end;
+    gap: 1.4mm;
+    min-width: 0;
+    margin-bottom: 1.4mm;
+}
+
+.line-field label, .line-field > span { white-space: nowrap; }
+.line-field input, .line-field select { flex: 1; width: 100%; height: 6mm; }
+.short-line { width: 58%; }
+.patient-line, .doctor-line, .medium-line, .blood-line, .lab-line { display: flex; gap: 4mm; }
+.patient-line > :first-child { flex: 1; }
+.age-field { width: 37mm; }
+.history-field { flex: 1; }
+.birth-field { width: 55mm; }
+
+.stacked-field {
+    display: flex;
+    flex-direction: column;
+    gap: 1mm;
+    margin: 2mm 0;
+}
+
+.stacked-field textarea {
+    width: 100%;
+    min-height: 14mm;
+    resize: none;
+    border-top: .7px solid transparent;
+    background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 6mm, #000 6.1mm, transparent 6.2mm);
+}
+
+.stacked-field select { width: 100%; height: 7mm; }
+.indication-field { margin-top: 2.5mm; }
+.lab-line { margin-top: 3mm; }
+.lab-line .line-field { flex: 1; }
+.lab-line input { text-align: center; }
+.medium-line { align-items: end; margin-top: 4mm; }
+.medium-name { flex: 1; margin: 0; }
+.quantity-field { width: 42mm; }
+.blood-line { width: 70%; margin-top: 2mm; }
+.blood-line .select-line { flex: 1; }
+.doctor-line { margin-top: 2mm; }
+.doctor-name { flex: 1; }
+.date-field { width: 47mm; }
+
+.reverse-label {
+    margin: 0 2mm 0 0;
+    text-align: right;
+    font-size: 13pt;
+}
+
+.release-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 11pt;
+}
+
+.release-table th, .release-table td {
+    height: 12mm;
+    padding: 1mm;
+    border: 1px solid #000;
+    font-weight: 400;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.release-table th:first-child { width: 25%; }
+.release-table th:nth-child(2) { width: 18%; }
+.release-table th:nth-child(3) { width: 20%; }
+.release-table th:nth-child(4) { width: 17%; }
+.release-table th:nth-child(5) { width: 20%; }
+.release-table td input { width: 100%; height: 7mm; text-align: center; }
+
+.signature-line {
+    display: grid;
+    grid-template-columns: auto 1fr auto 45mm;
+    align-items: end;
+    gap: 2mm;
+    margin-top: 3mm;
+}
+
+.signature-line input { width: 100%; height: 6mm; }
+.received-line { grid-template-columns: auto 1fr; width: 62%; }
+
+/* Лицевая сторона специально уплотнена примерно на 20 мм по высоте. */
+.request-front .line-field {
+    margin-bottom: .7mm;
+}
+
+.request-front .line-field input,
+.request-front .line-field select {
+    height: 5.5mm;
+}
+
+.request-front .stacked-field {
+    gap: .5mm;
+    margin: 1mm 0;
+}
+
+.request-front .stacked-field textarea {
+    min-height: 11.5mm;
+}
+
+.request-front .stacked-field select {
+    height: 6.3mm;
+}
+
+.request-front .indication-field,
+.request-front .lab-line,
+.request-front .medium-line,
+.request-front .blood-line,
+.request-front .doctor-line {
+    margin-top: 1mm;
+}
+
+@media print {
+    body { background: #fff; }
+    .request-actions, .payload-warning { display: none !important; }
+    .request-sheet {
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+    .request-front { break-after: page; page-break-after: always; }
+    .request-back { break-before: page; page-break-before: always; }
+    input, select, textarea {
+        appearance: none;
+        -webkit-appearance: none;
+        color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+    }
+    textarea {
+        overflow: hidden;
+        resize: none;
+    }
+    #indication, #componentName { display: none; }
+    #indicationPrintValue, #componentPrintValue {
+        display: block;
+        min-height: 6mm;
+        padding: .5mm;
+        border-bottom: .7px solid #000;
+        font-weight: 700;
+    }
+}

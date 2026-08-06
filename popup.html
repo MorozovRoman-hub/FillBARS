@@ -204,6 +204,32 @@
             margin-top: 10px;
         }
 
+        .document-action-split {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1px;
+            overflow: hidden;
+            border-radius: 4px;
+            background: #70869a;
+        }
+
+        .document-action-split button {
+            min-width: 0;
+            min-height: 42px;
+            padding: 7px 4px;
+            border-radius: 0;
+            font-size: 11px;
+            line-height: 1.15;
+        }
+
+        .document-action-split button:first-child {
+            border-radius: 4px 0 0 4px;
+        }
+
+        .document-action-split button:last-child {
+            border-radius: 0 4px 4px 0;
+        }
+
         .warning {
             width: 66.666%;
             margin-top: 10px;
@@ -422,7 +448,11 @@
 
     <div class="button-stack">
         <button id="fillForm" type="button">✅ Открыть лабораторию и заполнить</button>
-        <button id="openPrintSheet" class="secondary" type="button">🖨 Открыть лист назначений</button>
+        <div class="document-action-split" aria-label="Печатные документы">
+            <button id="openPrintSheet" class="secondary" type="button" title="Лист назначений">🖨 Лист назначений</button>
+            <button id="openBloodRequest" class="secondary" type="button" title="Заявка на компоненты крови">🩸 Заявка</button>
+            <button id="openTransfusionProtocol" class="secondary" type="button" title="Протокол трансфузии">Протокол</button>
+        </div>
         <button id="saveJournalEntry" class="secondary" type="button">💾 Сохранить в журнал</button>
         <button id="openJournal" class="ghost" type="button">📚 Журнал назначений</button>
         <button id="openDiagnostics" class="ghost" type="button">🧭 Диагностика запусков</button>
@@ -432,7 +462,7 @@
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.1.11 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.1.14 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>FillBARS transfusion fixture</title>
+</head>
+<body data-test-status="running">
+    <div id="status">RUNNING</div>
+    <p id="payloadWarning" class="hidden"></p>
+    <input id="patientFullName" data-user-field>
+    <input id="patientBirthDate" data-user-field type="date">
+    <input id="patientHistoryNumber" data-user-field>
+    <input id="requestDate" data-user-field type="date">
+    <input id="transfusionDate" data-user-field type="date">
+    <input id="department" data-user-field>
+    <input id="selectionOrganization" data-user-field>
+    <input id="transfusionDoctor" data-user-field>
+    <select id="indication" data-user-field><option value=""></option><option>Восполнение объема циркулирующих эритроцитов</option><option>Восполнение факторов свертывания крови</option></select>
+    <output id="indicationPrintValue"></output>
+    <select id="recipientAbo" data-user-field><option value=""></option><option>O(I)</option><option>A(II)</option><option>B(III)</option><option>AB(IV)</option></select>
+    <select id="recipientRh" data-user-field><option value=""></option><option>Rh(+)</option><option>Rh(-)</option></select>
+    <select id="donorAbo" data-user-field><option value=""></option><option>O(I)</option><option>A(II)</option><option>B(III)</option><option>AB(IV)</option></select>
+    <select id="donorRh" data-user-field><option value=""></option><option>Rh(+)</option><option>Rh(-)</option></select>
+    <input id="beforeBp" data-user-field><input id="beforePulse" data-user-field><input id="beforeTemperature" data-user-field><input id="beforeDiuresis" data-user-field>
+    <input id="afterOneHourBp" data-user-field><input id="afterOneHourPulse" data-user-field><input id="afterOneHourTemperature" data-user-field><input id="afterOneHourDiuresis" data-user-field>
+    <input id="afterTwoHoursBp" data-user-field><input id="afterTwoHoursPulse" data-user-field><input id="afterTwoHoursTemperature" data-user-field><input id="afterTwoHoursDiuresis" data-user-field>
+    <button id="printButton" type="button"></button>
+    <button id="exportWordButton" type="button"></button>
+    <button id="exportExcelButton" type="button"></button>
+    <button id="clearButton" type="button"></button>
+    <button id="closeButton" type="button"></button>
+    <script src="../office-templates.js"></script>
+    <script src="../office-export.js"></script>
+    <script src="../transfusion.js"></script>
+    <script src="transfusion-fixture.js"></script>
+</body>
+</html>
