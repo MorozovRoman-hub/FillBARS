@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Auto Form Filler (МИС БАРС)",
-  "version": "5.1.14",
-  "description": "Автоматическое назначение анализов в МИС БАРС с выбором профилей",
+  "name": "FillBARS Card — назначения и дневники",
+  "version": "5.2.5",
+  "description": "Назначения и дневники МИС БАРС: шаблоны, предпросмотр и последовательное заполнение.",
+  "minimum_chrome_version": "112",
   "permissions": [
     "activeTab",
     "scripting",

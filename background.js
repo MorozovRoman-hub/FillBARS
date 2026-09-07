@@ -435,3 +435,5 @@ chrome.runtime.onStartup.addListener(() => {
         .catch(() => undefined)
         .then(() => recoverStaleDiagnosticRuns());
 });
+
+importScripts('diary-core.js', 'diary-background.js', 'diary-window.js');

@@ -1,3 +1,10 @@
 # Local reference documents and visual QA output may contain patient data.
 tests/fixtures/*.docx
 tests/artifacts/
+fillbars-card-log*.json
+
+# Local development output.
+node_modules/
+coverage/
+*.log
+test-results/

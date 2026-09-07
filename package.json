@@ -1,0 +1,13 @@
+{
+  "name": "fillbars-card",
+  "version": "5.2.5",
+  "private": true,
+  "description": "Локальные проверки расширения FillBARS Card; сборка для установки не нужна.",
+  "scripts": {
+    "test": "node --test tests/card-*.test.js",
+    "test:upstream": "node tests/runtime-injection-check.js",
+    "check": "node tests/card-package-check.js"
+  },
+  "devDependencies": { "jsdom": "30.0.1" },
+  "engines": { "node": ">=24.15.0" }
+}
