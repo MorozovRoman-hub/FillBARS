@@ -677,7 +677,7 @@
     };
 
     try {
-        assert(window.FillBARSAdapter?.version === '5.1.14', 'Загружен адаптер FillBARS 5.1.14');
+        assert(window.FillBARSAdapter?.version === '5.2.6', 'Загружен адаптер FillBARS 5.2.6');
         const legacy = await runScenario('legacy');
         const d3 = await runScenario('d3');
         const d3Fallback = await runD3ActivationFallbackScenario();

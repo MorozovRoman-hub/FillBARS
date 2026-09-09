@@ -24,7 +24,7 @@ const bloodRequestHtml = read('blood-request.html');
 const bloodRequestJs = read('blood-request.js');
 const version = manifest.version;
 
-assert(version === '5.1.14', `unexpected manifest version: ${version}`);
+assert(version === '5.2.6', `unexpected manifest version: ${version}`);
 assert(popup.includes(`const EXTENSION_VERSION = '${version}'`), 'popup version is not synchronized');
 assert(popup.includes('loadedManifestVersion !== EXTENSION_VERSION')
     && popup.includes('Загружена смешанная версия')
@@ -100,8 +100,8 @@ assert(popup.includes('openTransfusionProtocol')
     && transfusionJs.includes("setValue('transfusionDoctor', patient.doctorName)")
     && transfusionHtml.includes('id="exportWordButton"')
     && transfusionHtml.includes('id="exportExcelButton"')
-    && transfusionHtml.includes('office-templates.js?v=5.1.14')
-    && transfusionHtml.includes('office-export.js?v=5.1.14')
+    && transfusionHtml.includes('office-templates.js?v=5.2.6')
+    && transfusionHtml.includes('office-export.js?v=5.2.6')
     && transfusionJs.includes('buildExportValues')
     && transfusionJs.includes('downloadDocx')
     && transfusionJs.includes('downloadXlsx')

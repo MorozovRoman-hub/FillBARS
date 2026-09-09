@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FillBARS Card — Дневники</title>
+  <link rel="stylesheet" href="diaries.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><img src="badger.png" alt="" width="40" height="40"><div><span class="eyebrow">FILLBARS CARD</span><h1>Дневники</h1></div></div>
+    <section class="header-patient patient-data" aria-label="Карточка пациента"><strong id="patientName">Определяем пациента…</strong><span id="patientDetails">Читаем открытую карточку БАРС.</span><div class="gender-choice"><label for="textGender">Род текста</label><select id="textGender" aria-describedby="genderHint"><option value="auto">Авто</option><option value="male">Мужской</option><option value="female">Женский</option></select></div><span id="genderHint">Используется при выборе шаблона.</span></section>
+    <div class="header-actions"><button id="manageTemplates" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#library"></use></svg>Шаблоны дневников</button><button id="openSettings" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#settings"></use></svg>Настройки</button></div>
+  </header>
+  <main>
+    <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+    <div id="errors" class="errors" role="alert" tabindex="-1" hidden></div>
+    <section id="runPanel" class="run-panel" aria-label="Отправка дневников" hidden>
+      <div><strong id="runTitle"></strong><span id="runMessage"></span></div><progress id="runProgress" max="1" value="0"></progress>
+      <button id="stop" class="danger" hidden>Остановить после текущего действия</button>
+      <p id="runRecovery" class="run-recovery" hidden></p>
+      <button id="resolveRun" class="primary" hidden>Запись сохранена — продолжить</button>
+      <button id="discardRun" class="text-button danger-text" hidden>Удалить локальную очередь…</button>
+      <details id="runDiagnostics" class="run-diagnostics" hidden><summary>Журнал выполнения</summary><pre id="runLog"></pre><button id="downloadRunLog" class="secondary">Скачать журнал</button></details>
+    </section>
+    <div class="workspace">
+      <aside class="schedule">
+        <div class="section-heading"><div><span class="eyebrow">РАСПИСАНИЕ</span><h2>Записи <span id="rowCount" class="count">1</span></h2></div><button id="clearDraft" class="icon-button" title="Очистить черновик" aria-label="Очистить черновик"><svg aria-hidden="true"><use href="diary-icons.svg#trash"></use></svg></button></div>
+        <label for="profile">Шаблон выбранной записи</label><select id="profile"><option value="">Без шаблона</option></select>
+        <p id="profileHint" class="hint">Без шаблона новое время копирует тексты выбранной записи и показатели последней записи.</p>
+        <div id="rowList" class="row-list" aria-label="Подготовленные дневники"></div>
+        <button id="addTime" class="primary wide"><svg aria-hidden="true"><use href="diary-icons.svg#plus"></use></svg>Добавить время</button>
+        <div class="step-row"><label for="hourStep">Шаг, часов</label><input id="hourStep" type="number" min="1" max="24" value="4"></div>
+        <button id="addDay" class="ghost wide">Добавить следующий день</button>
+        <div class="schedule-note"><svg aria-hidden="true"><use href="diary-icons.svg#shield"></use></svg><p>Сначала проверьте каждую запись. Дневники отправляются в порядке списка.</p></div>
+      </aside>
+      <section class="editor" aria-labelledby="editorTitle">
+        <div class="editor-heading"><div><span class="eyebrow">ПРЕДПРОСМОТР И ПРАВКА</span><h2 id="editorTitle">Запись 1</h2></div><div class="inline-actions"><span id="rowBadge" class="badge">Черновик</span><button id="deleteRow" class="icon-button" title="Удалить запись из черновика" aria-label="Удалить запись из черновика"><svg aria-hidden="true"><use href="diary-icons.svg#trash"></use></svg></button></div></div>
+        <fieldset id="rowFields">
+          <legend class="sr-only">Поля выбранного дневника</legend>
+          <div class="datetime">
+            <div><label for="date">Дата осмотра</label><input id="date" type="date" required></div>
+            <div><label for="time">Время</label><input id="time" type="time" required></div>
+            <div class="inherit-note">Новое время наследует показатели последней записи.</div>
+          </div>
+          <div class="text-heading"><strong>Показатели</strong><button id="anotherVitals" class="text-button" type="button"><svg aria-hidden="true"><use href="diary-icons.svg#shuffle"></use></svg>Подобрать показатели</button></div>
+          <div class="vitals">
+            <div><label for="temperature">Температура <span>°C</span></label><input id="temperature" inputmode="text" autocomplete="off" aria-describedby="vitalsHint"></div>
+            <div><label for="pressure">АД <span>мм рт. ст.</span></label><input id="pressure" inputmode="text" placeholder="120/80" autocomplete="off"></div>
+            <div><label for="pulse">ЧСС <span>в минуту</span></label><input id="pulse" inputmode="text" autocomplete="off"></div>
+            <div><label for="respiration">ЧД <span>в минуту</span></label><input id="respiration" inputmode="text" autocomplete="off"></div>
+          </div>
+          <p id="vitalsHint" class="hint">Можно вводить числа, диапазоны и пояснения. Значения передаются в БАРС без изменений.</p>
+          <div class="text-heading"><label for="diary">Дневник врача</label><button id="anotherVariant" class="text-button"><svg aria-hidden="true"><use href="diary-icons.svg#shuffle"></use></svg>Другой вариант</button></div>
+          <textarea id="diary" rows="8" maxlength="4000" placeholder="Выберите шаблон заболевания или напишите дневник…"></textarea>
+          <div class="field-meta"><span id="variantLabel">Свободный текст</span><span id="diaryCount">0 / 4000</span></div>
+          <div class="plans">
+            <div><label for="examination">План обследования</label><textarea id="examination" rows="5" maxlength="4000" placeholder="Обследования, контроль показателей…"></textarea><div id="examinationCount" class="counter">0 / 4000</div></div>
+            <div><label for="treatment">План лечения и рекомендации</label><textarea id="treatment" rows="5" maxlength="4000" placeholder="План лечения и рекомендации…"></textarea><div id="treatmentCount" class="counter">0 / 4000</div></div>
+          </div>
+          <label class="review-check"><input id="reviewed" type="checkbox"><span>Дата, измерения и тексты этой записи проверены мной</span></label>
+        </fieldset>
+      </section>
+    </div>
+  </main>
+  <footer class="action-bar">
+    <div><strong id="readyCount">Проверено 0 из 1</strong><span id="storageNote">Черновик сохраняется при повторном открытии того же пациента и сбрасывается при смене пациента.</span></div>
+    <div class="footer-buttons"><button id="fillOnly" class="secondary">Заполнить выбранную без сохранения</button><button id="sendAll" class="primary"><svg aria-hidden="true"><use href="diary-icons.svg#check"></use></svg>Записать дневники в БАРС</button></div>
+  </footer>
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <div class="dialog-header"><div><span class="eyebrow">ДНЕВНИКИ</span><h2 id="settingsTitle">Настройки</h2></div><button id="closeSettings" class="icon-button" aria-label="Закрыть настройки"><svg aria-hidden="true"><use href="diary-icons.svg#close"></use></svg></button></div>
+    <p class="hint">Сохраняются в этом браузере. Исходные значения применяются к первой записи новой очереди. Уже подготовленные дневники не изменяются.</p>
+    <label for="settingsHourStep">Шаг расписания по умолчанию, часов</label><input id="settingsHourStep" type="number" min="1" max="24" step="1" value="4">
+    <h3>Исходные показатели</h3>
+    <div class="vitals">
+      <div><label for="settingsTemperature">Температура <span>°C</span></label><input id="settingsTemperature" maxlength="67" value="36,6"></div>
+      <div><label for="settingsPressure">АД <span>мм рт. ст.</span></label><input id="settingsPressure" maxlength="67" value="120/80"></div>
+      <div><label for="settingsPulse">ЧСС <span>в минуту</span></label><input id="settingsPulse" maxlength="67" value="80"></div>
+      <div><label for="settingsRespiration">ЧДД <span>в минуту</span></label><input id="settingsRespiration" maxlength="67" value="16"></div>
+    </div>
+    <p class="hint">Перед отправкой проверьте показатели. Следующая запись наследует значения последней записи с учётом настройки разброса.</p>
+    <details class="spread-settings">
+      <summary>Разброс показателей</summary>
+      <p class="hint">Подбор моделирует показатели манекена. Первая запись — в пределах разброса от исходных значений; следующие — от показателей последней записи. Чем дальше от исходного значения, тем ниже вероятность.</p>
+      <div class="spread-grid">
+        <label>Температура ±<input id="spreadTemperature" type="number" min="0" max="0.3" step="0.1" value="0.3"></label>
+        <label>Систолическое ±<input id="spreadSystolic" type="number" min="0" max="20" step="1" value="20"></label>
+        <label>Диастолическое ±<input id="spreadDiastolic" type="number" min="0" max="20" step="1" value="20"></label>
+        <label>ЧСС ±<input id="spreadPulse" type="number" min="0" max="20" step="1" value="10"></label>
+        <label>ЧДД ±<input id="spreadRespiration" type="number" min="0" max="2" step="1" value="2"></label>
+      </div>
+      <label class="review-check"><input id="autoPickVitals" type="checkbox"><span>Автоматически подбирать показатели для новых записей</span></label>
+      <p class="hint">Если выключено, первая запись получает исходные показатели, следующие наследуют последние введённые значения. Кнопка «Подобрать показатели» работает по нажатию.</p>
+    </details>
+    <div id="settingsError" class="errors" role="alert" hidden></div>
+    <div class="settings-footer"><button id="saveSettings" class="primary">Сохранить настройки</button></div>
+  </dialog>
+  <dialog id="templatesDialog" aria-labelledby="templatesTitle">
+    <div class="dialog-header"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2 id="templatesTitle">Шаблоны дневников</h2></div><button id="closeTemplates" class="icon-button" aria-label="Закрыть шаблоны"><svg aria-hidden="true"><use href="diary-icons.svg#close"></use></svg></button></div>
+    <p class="hint">Один вариант объединяет дневник и два плана. Храните здесь общие тексты без данных пациентов.</p>
+    <div class="template-workspace">
+      <aside><div id="templateList" class="template-list"></div><button id="newProfile" class="secondary wide">+ Заболевание</button><div class="import-export"><button id="importTemplates" class="text-button">Импорт</button><button id="exportTemplates" class="text-button">Экспорт JSON</button><input id="importFile" type="file" accept=".json,application/json" hidden></div></aside>
+      <section id="templateEditor">
+        <label for="profileName">Название заболевания</label><input id="profileName" maxlength="120" placeholder="Например: послеоперационное наблюдение">
+        <div class="variant-toolbar"><select id="templateVariant" aria-label="Вариант шаблона"></select><button id="newVariant" class="secondary">+ Вариант</button><button id="deleteVariant" class="icon-button" aria-label="Удалить вариант"><svg aria-hidden="true"><use href="diary-icons.svg#trash"></use></svg></button></div>
+        <details id="genderEditor" class="gender-settings">
+          <summary>Мужской и женский род</summary>
+          <p class="hint">Введите мужскую и женскую формы. При выборе шаблона программа найдёт любую из них в дневнике и планах и заменит на форму для пациента. Текст шаблона пишите обычными словами; пары общие для всех его вариантов.</p>
+          <p class="hint">Например, «больного / больной» для фразы «состояние больной». Учитывайте падеж. Если одно слово встречается в разных парах, задайте целые фразы: «состояние больного / состояние больной».</p>
+          <div id="genderPairs" class="gender-pairs"></div>
+          <button id="addGenderPair" class="secondary">+ Пара слов</button>
+        </details>
+        <label for="variantTitle">Название варианта</label><input id="variantTitle" maxlength="120">
+        <label for="templateDiary">Дневник</label><textarea id="templateDiary" rows="6" maxlength="4000"></textarea>
+        <div class="plans"><div><label for="templateExamination">План обследования</label><textarea id="templateExamination" rows="4" maxlength="4000"></textarea></div><div><label for="templateTreatment">План лечения</label><textarea id="templateTreatment" rows="4" maxlength="4000"></textarea></div></div>
+        <div class="template-footer"><button id="deleteProfile" class="text-button danger-text">Удалить заболевание</button><button id="saveTemplates" class="primary">Сохранить библиотеку</button></div>
+      </section>
+    </div>
+    <div id="templateError" class="errors" role="alert" hidden></div>
+  </dialog>
+  <script src="diary-core.js"></script>
+  <script src="diaries.js"></script>
+</body>
+</html>
