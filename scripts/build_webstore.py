@@ -31,7 +31,7 @@ def validate(files):
     refs.update(manifest['action']['default_icon'].values())
     refs.update((manifest['background']['service_worker'], manifest['action']['default_popup']))
     for ref in refs:
-        assert urlsplit(ref).path.removeprefix('./') in files, f'Missing manifest asset: {ref}'
+        assert ref in files, f'Missing exact manifest asset: {ref}'
     for name, data in files.items():
         if not name.endswith(('.html', '.css')):
             continue

@@ -6,6 +6,10 @@ assert.equal(manifest.version,'5.2.6');
 assert.equal(manifest.manifest_version,3);
 assert.deepEqual(manifest.permissions,['activeTab','scripting','storage']);
 assert(!manifest.host_permissions && !manifest.externally_connectable);
+for(const asset of [...Object.values(manifest.icons || {}), ...Object.values(manifest.action.default_icon)]){
+    assert(!asset.startsWith('./') && !asset.includes('\\'), 'Icon path must match ZIP entry exactly: '+asset);
+    assert(fs.existsSync(path.join(root,asset)), 'Missing manifest icon: '+asset);
+}
 for(const file of ['diary-core.js','diary-background.js','diary-bars-adapter.js','diary-launch.js','diary-window.js','diaries.js','background.js']){
     new vm.Script(fs.readFileSync(path.join(root,file),'utf8'),{filename:file});
 }

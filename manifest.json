@@ -4,6 +4,9 @@
   "version": "5.2.6",
   "description": "Назначения и дневники МИС БАРС: шаблоны, предпросмотр и последовательное заполнение.",
   "minimum_chrome_version": "112",
+  "icons": {
+    "128": "badger.png"
+  },
   "permissions": [
     "activeTab",
     "scripting",
@@ -15,9 +18,9 @@
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "./badger.png",
-      "48": "./badger.png",
-      "128": "./badger.png"
+      "16": "badger.png",
+      "48": "badger.png",
+      "128": "badger.png"
     }
   }
 }
