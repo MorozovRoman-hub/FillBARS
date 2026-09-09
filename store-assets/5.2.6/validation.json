@@ -1,0 +1,38 @@
+[
+  {
+    "file": "01-assignments-1280x800.jpg",
+    "size": [
+      1280,
+      800
+    ],
+    "format": "JPEG RGB 24-bit, no alpha",
+    "bytes": 104984
+  },
+  {
+    "file": "02-diaries-1280x800.jpg",
+    "size": [
+      1280,
+      800
+    ],
+    "format": "JPEG RGB 24-bit, no alpha",
+    "bytes": 92872
+  },
+  {
+    "file": "03-templates-1280x800.jpg",
+    "size": [
+      1280,
+      800
+    ],
+    "format": "JPEG RGB 24-bit, no alpha",
+    "bytes": 85560
+  },
+  {
+    "file": "04-promo-440x280.jpg",
+    "size": [
+      440,
+      280
+    ],
+    "format": "JPEG RGB 24-bit, no alpha",
+    "bytes": 22282
+  }
+]
