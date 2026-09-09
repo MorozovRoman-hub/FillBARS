@@ -26,3 +26,4 @@ jobs:
       - run: npm test
       - run: npm run check
       - run: npm run test:upstream
+      - run: python scripts/build_webstore.py "${{ runner.temp }}/FillBARS-WebStore.zip"

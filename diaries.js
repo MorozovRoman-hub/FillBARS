@@ -7,7 +7,7 @@
     let tabId = Number(params.get('tab'));
     if (params.has('preview') && ['127.0.0.1', 'localhost'].includes(location.hostname)) await import('./tests/card-preview-host.js');
     async function request(action, data = {}) {
-        const message = { namespace: 'fillbars-card-v1', tabId, action, ...data };
+        const message = { namespace: 'fillbars-card-v1', tabId, contextId: state?.contextId, action, ...data };
         const response = window.cardPreviewRequest ? await window.cardPreviewRequest(message) : await chrome.runtime.sendMessage(message);
         if (!response?.ok) throw new Error(response?.error || 'Расширение не ответило. Откройте окно дневников заново.');
         return response;
@@ -15,7 +15,7 @@
     let library = C.emptyLibrary();
     let settings = C.cleanSettings();
     let state = null;
-    const newDraft = () => ({ rows: [C.createRow({ defaults: settings.defaults })], defaults: { ...settings.defaults }, profileId: '', hourStep: settings.hourStep, gender: 'auto' });
+    const newDraft = () => ({ rows: [C.createRow({ defaults: settings.defaults, autoPick: settings.autoPick, spread: settings.spread })], defaults: { ...settings.defaults }, profileId: '', hourStep: settings.hourStep, gender: 'auto' });
     let draft = newDraft();
     let selected = draft.rows[0].id;
     let saveTimer;
@@ -46,7 +46,8 @@
     function saveDraft() {
         clearTimeout(saveTimer);
         const copy = C.clone(draft);
-        saveChain = saveChain.catch(() => undefined).then(() => request('draft', { draft: copy }));
+        const destination = { tabId, contextId: state?.contextId };
+        saveChain = saveChain.catch(() => undefined).then(() => request('draft', { draft: copy, ...destination }));
         return saveChain;
     }
     function scheduleSave() {
@@ -88,7 +89,8 @@
     function renderProfiles() {
         $('profile').replaceChildren(new Option('Без шаблона', ''), ...library.profiles.map(profile => new Option(profile.name, profile.id)));
         $('profile').value = row().profileId || '';
-        $('profileHint').textContent = row().profileId ? 'Новое время получит другой вариант этого шаблона и показатели выбранной записи.' : 'Без шаблона новое время копирует тексты и показатели выбранной записи.';
+        $('profileHint').textContent = row().profileId ? 'Новое время получит другой вариант этого шаблона.' : 'Без шаблона новое время копирует тексты выбранной записи.';
+        $('profileHint').textContent += settings.autoPick ? ' Показатели подбираются от последней записи.' : ' Показатели наследуются из последней записи.';
     }
     function renderList() {
         $('rowCount').textContent = draft.rows.length;
@@ -97,8 +99,8 @@
             button.className = 'schedule-item';
             button.type = 'button';
             button.setAttribute('aria-current', String(item.id === selected));
-            const status = item.status === 'saved' ? 'Сохранён' : item.demo ? 'Демо' : item.reviewed ? 'Проверен' : '';
-            button.innerHTML = '<span class="row-number">' + String(index + 1).padStart(2, '0') + '</span><span><span class="row-time">' + escape(item.time || '—:—') + '</span><span class="row-date">' + escape(C.barsDate(item.date) || 'Без даты') + '</span></span><span class="row-status ' + (item.demo ? 'demo' : '') + '">' + status + '</span>';
+            const status = item.status === 'saved' ? 'Сохранён' : item.reviewed ? 'Проверен' : '';
+            button.innerHTML = '<span class="row-number">' + String(index + 1).padStart(2, '0') + '</span><span><span class="row-time">' + escape(item.time || '—:—') + '</span><span class="row-date">' + escape(C.barsDate(item.date) || 'Без даты') + '</span></span><span class="row-status">' + status + '</span>';
             button.addEventListener('click', () => { selected = item.id; resetErrors(); render(); });
             return button;
         }));
@@ -145,7 +147,7 @@
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
     function render() {
-        if (!draft.rows.length) { draft.rows.push(C.createRow({ defaults: draft.defaults })); selected = draft.rows[0].id; }
+        if (!draft.rows.length) { draft.rows.push(C.createRow({ defaults: settings.defaults, autoPick: settings.autoPick, spread: settings.spread })); selected = draft.rows[0].id; }
         const current = row();
         selected = current.id;
         renderProfiles(); renderList(); renderRun();
@@ -162,22 +164,22 @@
         for (const field of C.vitalFields) $(field).value = current.vitals[field];
         $('reviewed').checked = !!current.reviewed;
         $('hourStep').value = draft.hourStep || 4;
-        $('rowBadge').textContent = current.status === 'saved' ? 'Сохранена' : current.demo ? 'Демонстрация' : current.reviewed ? 'Проверена' : 'Черновик';
-        $('rowBadge').className = 'badge' + (current.demo ? ' demo' : current.reviewed || current.status === 'saved' ? ' ready' : '');
+        $('rowBadge').textContent = current.status === 'saved' ? 'Сохранена' : current.reviewed ? 'Проверена' : 'Черновик';
+        $('rowBadge').className = 'badge' + (current.reviewed || current.status === 'saved' ? ' ready' : '');
         const profile = library.profiles.find(item => item.id === current.profileId);
         const variant = profile?.variants.find(item => item.id === current.variantId);
         $('variantLabel').textContent = profile ? profile.name + (variant ? ' · ' + variant.title : '') : 'Свободный текст';
         const readOnly = locked() || current.status === 'saved';
         $('rowFields').disabled = readOnly;
-        $('reviewed').disabled = readOnly || current.demo;
-        for (const id of ['addTime', 'addDay', 'addDemo', 'profile', 'hourStep', 'clearDraft']) $(id).disabled = locked();
+        $('reviewed').disabled = readOnly;
+        for (const id of ['addTime', 'addDay', 'profile', 'hourStep', 'clearDraft']) $(id).disabled = locked();
         $('profile').disabled = readOnly;
-        $('addDemo').disabled = locked() || settingsSaving;
+        $('anotherVitals').disabled = readOnly;
         $('deleteRow').disabled = locked() || current.status === 'saved';
         $('anotherVariant').disabled = readOnly || !(library.profiles.find(p => p.id === current.profileId)?.variants.length);
-        $('fillOnly').disabled = locked() || !connected || !state?.patient || current.status === 'saved' || current.demo;
-        $('sendAll').disabled = locked() || !connected || !state?.patient || !draft.rows.some(item => item.status !== 'saved' && !item.demo);
-        $('readyCount').textContent = 'Проверено ' + draft.rows.filter(item => item.reviewed && !item.demo).length + ' из ' + draft.rows.length;
+        $('fillOnly').disabled = locked() || !connected || !state?.patient || current.status === 'saved';
+        $('sendAll').disabled = locked() || !connected || !state?.patient || !draft.rows.some(item => item.status !== 'saved');
+        $('readyCount').textContent = 'Проверено ' + draft.rows.filter(item => item.reviewed).length + ' из ' + draft.rows.length;
         for (const field of C.textFields) $(field + 'Count').textContent = current[field].length + ' / 4000';
     }
     for (const field of ['date', 'time', ...C.vitalFields, ...C.textFields]) {
@@ -186,14 +188,14 @@
             if (locked() || current.status === 'saved') return;
             if (C.vitalFields.includes(field)) {
                 current.vitals[field] = $(field).value;
-                if (!current.demo) draft.defaults[field] = $(field).value;
+                draft.defaults[field] = $(field).value;
             } else current[field] = $(field).value;
             current.reviewed = false;
             $('reviewed').checked = false;
-            $('rowBadge').textContent = current.demo ? 'Демонстрация' : 'Черновик';
-            $('rowBadge').className = current.demo ? 'badge demo' : 'badge';
+            $('rowBadge').textContent = 'Черновик';
+            $('rowBadge').className = 'badge';
             renderList();
-            $('readyCount').textContent = 'Проверено ' + draft.rows.filter(item => item.reviewed && !item.demo).length + ' из ' + draft.rows.length;
+            $('readyCount').textContent = 'Проверено ' + draft.rows.filter(item => item.reviewed).length + ' из ' + draft.rows.length;
             for (const name of C.textFields) $(name + 'Count').textContent = current[name].length + ' / 4000';
             $(field).removeAttribute('aria-invalid');
             if ($(field).nextElementSibling?.classList.contains('inline-error')) $(field).nextElementSibling.remove();
@@ -201,7 +203,7 @@
         });
     }
     $('reviewed').addEventListener('change', () => {
-        if (row().demo || locked()) return;
+        if (locked()) return;
         if ($('reviewed').checked) {
             const errors = C.validateRow(row());
             if (errors.length) { $('reviewed').checked = false; showErrors(errors); return; }
@@ -236,13 +238,22 @@
         else { Object.assign(row(), { profileId: '', variantId: '' }); draft.profileId = ''; render(); scheduleSave(); }
     });
     $('anotherVariant').addEventListener('click', () => applyVariant());
+    $('anotherVitals').addEventListener('click', () => {
+        if (locked() || row().status === 'saved') return;
+        try {
+            const vitals = C.sampleVitals(row().vitals, settings.spread);
+            Object.assign(row(), { vitals, reviewed: false });
+            resetErrors(); render(); scheduleSave();
+            message('Показатели подобраны. Проверьте запись перед отправкой.');
+        } catch (error) { message(error.message, true); }
+    });
     $('textGender').addEventListener('change', () => {
         if (locked()) return;
         draft.gender = $('textGender').value; render(); scheduleSave();
         message('Род будет учтён при следующем выборе шаблона. Уже подготовленные тексты сохранены.');
     });
     $('hourStep').addEventListener('change', () => { draft.hourStep = Math.max(1, Math.min(24, Number($('hourStep').value) || 4)); $('hourStep').value = draft.hourStep; scheduleSave(); });
-    function addRow({ nextDay = false, demo = false, demoValues = null } = {}) {
+    function addRow({ nextDay = false } = {}) {
         if (locked()) return;
         if (draft.rows.length >= C.MAX_ROWS) return message('В одной очереди не более ' + C.MAX_ROWS + ' записей.', true);
         const previous = draft.rows.at(-1);
@@ -257,12 +268,12 @@
         const profile = library.profiles.find(item => item.id === source.profileId);
         let entry;
         try {
-            entry = C.createRow({ previous: source, profile, ...stamp, demo, gender: textGender() });
+            entry = C.createRow({ previous: source, profile, ...stamp, gender: textGender() });
             if (profile && previous !== source) {
                 const variant = C.chooseVariant(profile, previous.diary, Math.random, textGender());
                 Object.assign(entry, Object.fromEntries(C.textFields.map(field => [field, variant[field]])), { variantId: variant.id });
             }
-            if (demo) entry.vitals = demoValues || C.sampleDemo(settings.defaults, settings.spread);
+            entry.vitals = settings.autoPick ? C.sampleVitals(previous.vitals, settings.spread) : { ...previous.vitals };
         } catch (error) { return message(error.message, true); }
         draft.rows.push(entry); selected = entry.id; resetErrors(); render(); scheduleSave();
         return true;
@@ -279,9 +290,10 @@
     async function connect() {
         if (busy || running() || unresolved()) return;
         contextRevision++;
+        const wasConnected = connected;
         busy = true; connected = false; render(); resetErrors(); message('');
         try {
-            await saveDraft();
+            if (wasConnected) await saveDraft();
             const response = await request('connect');
             state = response.state;
             connected = !!state?.patient;
@@ -303,7 +315,7 @@
             busy = true; render();
             try {
                 // Flush the old patient's draft before changing the destination of messages.
-                await saveDraft();
+                if (connected) await saveDraft();
                 const loaded = await request('load', { tabId: sourceTabId });
                 tabId = sourceTabId;
                 history.replaceState(null, '', '?tab=' + tabId);
@@ -392,6 +404,7 @@
         for (const field of C.vitalFields) $('settings' + upperFirst(field)).value = settings.defaults[field];
         for (const field of Object.keys(C.DEFAULT_SPREAD)) $('spread' + upperFirst(field)).value = settings.spread[field];
         $('settingsHourStep').value = settings.hourStep;
+        $('autoPickVitals').checked = settings.autoPick;
         $('settingsError').hidden = true;
     }
     $('openSettings').addEventListener('click', () => { renderSettings(); $('settingsDialog').showModal(); });
@@ -401,27 +414,25 @@
     }
     $('closeSettings').addEventListener('click', closeSettings);
     $('settingsDialog').addEventListener('cancel', event => { event.preventDefault(); closeSettings(); });
-    async function saveSettings(createDemo = false) {
-        if (settingsSaving || (createDemo && locked())) return;
-        settingsSaving = true; $('saveSettings').disabled = true; $('addDemo').disabled = true;
+    async function saveSettings() {
+        if (settingsSaving) return;
+        settingsSaving = true; $('saveSettings').disabled = true;
         try {
             const candidate = C.cleanSettings({
                 defaults: Object.fromEntries(C.vitalFields.map(field => [field, $('settings' + upperFirst(field)).value])),
                 hourStep: $('settingsHourStep').value,
+                autoPick: $('autoPickVitals').checked,
                 spread: Object.fromEntries(Object.keys(C.DEFAULT_SPREAD).map(field => [field, $('spread' + upperFirst(field)).value]))
             });
-            const demoValues = createDemo ? C.sampleDemo(candidate.defaults, candidate.spread) : null;
             const response = await request('saveSettings', { settings: candidate });
             settings = C.cleanSettings(response.settings);
-            if (createDemo && !addRow({ demo: true, demoValues })) throw new Error('Пример не создан. Проверьте выбранный шаблон и род текста.');
             $('settingsDialog').close();
-            message(createDemo ? 'Учебный пример добавлен. Следующее время наследует его значения и учебный режим.' : 'Настройки сохранены для новых очередей. Текущие записи не изменились.');
+            message('Настройки сохранены. Подбор применяется к новым записям; уже подготовленные записи не изменились.');
             $('openSettings').focus();
         } catch (error) { $('settingsError').textContent = error.message; $('settingsError').hidden = false; }
         finally { settingsSaving = false; $('saveSettings').disabled = false; render(); }
     }
     $('saveSettings').addEventListener('click', () => saveSettings());
-    $('addDemo').addEventListener('click', () => saveSettings(true));
     const editProfile = () => editLibrary?.profiles.find(profile => profile.id === editProfileId);
     const editVariant = () => editProfile()?.variants[editVariantIndex];
     function captureTemplate() {

@@ -27,17 +27,18 @@
             z-index: 0;
             width: 230px;
             height: 230px;
-            background: url("images/барсук.png") center / contain no-repeat;
+            background: url("images/badger-background.png") center / contain no-repeat;
             opacity: .16;
             pointer-events: none;
         }
 
         body::before {
             position: absolute;
-            top: 48px;
-            right: -18px;
-            width: 180px;
-            height: 180px;
+            top: 62px;
+            right: 14px;
+            width: 124px;
+            height: 90px;
+            opacity: .4;
         }
 
         body > * {
@@ -456,14 +457,13 @@
         <button id="openDiaries" type="button" style="display:flex;align-items:center;justify-content:center;gap:8px;background:#267c51"><svg width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="diary-icons.svg#diary"></use></svg>Дневники</button>
         <button id="saveJournalEntry" class="secondary" type="button">💾 Сохранить в журнал</button>
         <button id="openJournal" class="ghost" type="button">📚 Журнал назначений</button>
-        <button id="openDiagnostics" class="ghost" type="button">🧭 Диагностика запусков</button>
         <button id="closePopup" class="close-btn" type="button">✖ Закрыть</button>
     </div>
 
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.2.5 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.2.6 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
@@ -507,6 +507,10 @@
         <div class="section">
             <h4>Библиотека профилей</h4>
             <div id="templateLibraryList"></div>
+        </div>
+
+        <div class="section">
+            <button id="openDiagnostics" class="ghost" type="button">🧭 Диагностика запусков</button>
         </div>
 
         <div class="section">

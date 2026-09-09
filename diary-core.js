@@ -44,7 +44,7 @@
         return errors;
     }
     function validateRow(row, { forSending = false } = {}) {
-        // Clinical entries are free text. Numeric checks apply only to demo sampling.
+        // Entries are free text. Numeric checks apply only to simulated vital sampling.
         const errors = [];
         if (!validDate(row.date)) errors.push({ field: 'date', message: 'Укажите существующую дату.' });
         if (!validTime(row.time)) errors.push({ field: 'time', message: 'Укажите время в формате ЧЧ:ММ.' });
@@ -53,7 +53,6 @@
             if (/\{\{род:/i.test(row[field] || '')) errors.push({ field, message: 'В тексте осталась вставка рода. Выберите род текста и примените шаблон заново.' });
         }
         if (!norm(row.diary)) errors.push({ field: 'diary', message: 'Введите текст дневника.' });
-        if (forSending && row.demo) errors.push({ field: 'demo', message: 'Демонстрационные измерения нельзя отправить в БАРС. Создайте рабочую запись с измеренными значениями.' });
         if (forSending && !row.reviewed) errors.push({ field: 'reviewed', message: 'Проверьте запись и подтвердите данные осмотра.' });
         return errors;
     }
@@ -145,16 +144,16 @@
         const eligible = variants.length > 1 ? variants.filter(v => norm(v.diary).toLowerCase() !== previous) : variants;
         return eligible.length ? clone(eligible[Math.min(eligible.length - 1, Math.floor(Math.max(0, random()) * eligible.length))]) : null;
     }
-    function createRow({ defaults, previous = null, profile = null, date, time, demo = false, random, gender = '' } = {}) {
+    function createRow({ defaults, previous = null, profile = null, date, time, autoPick = false, spread = DEFAULT_SPREAD, random, gender = '' } = {}) {
         const stamp = dateParts();
         const variant = chooseVariant(profile, previous?.diary, random, gender);
         if (profile && !variant) throw new Error('Добавьте вариант в выбранный шаблон.');
         const texts = variant || previous || {};
         return {
             id: uid(), date: date || previous?.date || stamp.date, time: time || previous?.time || stamp.time,
-            vitals: { ...DEFAULTS, ...(defaults || previous?.vitals) }, diary: texts.diary || '', examination: texts.examination || '',
+            vitals: autoPick ? sampleVitals({ ...DEFAULTS, ...(previous?.vitals || defaults) }, spread, random) : { ...DEFAULTS, ...(previous?.vitals || defaults) }, diary: texts.diary || '', examination: texts.examination || '',
             treatment: texts.treatment || '', profileId: profile?.id || '', variantId: variant?.id || '',
-            reviewed: false, demo: demo || !!previous?.demo, status: 'draft'
+            reviewed: false, status: 'draft'
         };
     }
     function cleanSettings(raw = {}) {
@@ -167,15 +166,17 @@
         const spread = { ...DEFAULT_SPREAD, ...raw.spread };
         for (const key of Object.keys(SPREAD_LIMITS)) {
             spread[key] = number(spread[key]);
-            if (!Number.isFinite(spread[key]) || spread[key] < 0 || spread[key] > SPREAD_LIMITS[key] || (key !== 'temperature' && !Number.isInteger(spread[key]))) throw new Error('Проверьте границы учебного разброса.');
+            if (!Number.isFinite(spread[key]) || spread[key] < 0 || spread[key] > SPREAD_LIMITS[key] || (key !== 'temperature' && !Number.isInteger(spread[key]))) throw new Error('Проверьте границы разброса показателей.');
         }
-        return { defaults: Object.fromEntries(vitalFields.map(key => [key, defaults[key]])), hourStep, spread: Object.fromEntries(Object.keys(SPREAD_LIMITS).map(key => [key, spread[key]])) };
+        const autoPick = raw.autoPick === true;
+        if (autoPick && validateVitals(defaults).length) throw new Error('Для автоматического подбора задайте числовые исходные показатели.');
+        return { defaults: Object.fromEntries(vitalFields.map(key => [key, defaults[key]])), hourStep, autoPick, spread: Object.fromEntries(Object.keys(SPREAD_LIMITS).map(key => [key, spread[key]])) };
     }
     function normalSample(random = Math.random) {
         const u = Math.max(Number.EPSILON, random());
         return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * random());
     }
-    function sampleDemo(base, spread, random = Math.random) {
+    function sampleVitals(base, spread, random = Math.random) {
         const bp = pressure(base.pressure);
         if (validateVitals(base).length) throw new Error('Сначала исправьте исходные показатели.');
         const limits = SPREAD_LIMITS;
@@ -226,7 +227,7 @@
     function fields(row) {
         return { VISIT_DATE: barsDate(row.date), VISIT_TIME: row.time, TEMPERATURE: String(row.vitals?.temperature ?? ''), AD: String(row.vitals?.pressure ?? ''), THSS: String(row.vitals?.pulse ?? ''), THD: String(row.vitals?.respiration ?? ''), S_DNEVNIK: row.diary, STAC_PLAN: row.examination, RECOMEND_CONS: row.treatment };
     }
-    const api = { VERSION, TEXT_LIMIT, MAX_ROWS, DEFAULTS, DEFAULT_SPREAD, textFields, vitalFields, uid, clone, norm, dateParts, validDate, validTime, barsDate, pressure, number, validateVitals, validateRow, validateQueue, inferGender, renderVariant, chooseVariant, createRow, sampleDemo, cleanSettings, cleanLibrary, emptyLibrary, fields };
+    const api = { VERSION, TEXT_LIMIT, MAX_ROWS, DEFAULTS, DEFAULT_SPREAD, textFields, vitalFields, uid, clone, norm, dateParts, validDate, validTime, barsDate, pressure, number, validateVitals, validateRow, validateQueue, inferGender, renderVariant, chooseVariant, createRow, sampleVitals, cleanSettings, cleanLibrary, emptyLibrary, fields };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.FillBARSCardCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

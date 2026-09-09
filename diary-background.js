@@ -4,11 +4,21 @@
     const NS = 'fillbars-card-v1';
     const LIBRARY = 'cardLibraryV1';
     const SETTINGS = 'cardSettingsV1';
+    const ACTIVE = 'cardActiveContextV1';
     const running = new Map();
-    const operations = new Map();
+    let operations = Promise.resolve();
     const key = tabId => 'cardSessionV1:' + tabId;
     const load = async tabId => (await chrome.storage.session.get(key(tabId)))[key(tabId)] || null;
     const store = async (tabId, state) => { await chrome.storage.session.set({ [key(tabId)]: state }); return state; };
+    const activeContext = async () => (await chrome.storage.session.get(ACTIVE))[ACTIVE] || null;
+    const protectedRun = state => ['running', 'uncertain', 'interrupted'].includes(state?.run?.status);
+    async function assertContext(tabId, message) {
+        const active = await activeContext();
+        const state = await load(tabId);
+        if ((active && active.tabId !== tabId) || ((state?.contextId || message.contextId) && message.contextId !== state?.contextId)) {
+            throw new Error('Пациент в окне изменился. Откройте дневники из нужной карточки заново.');
+        }
+    }
     const publicError = () => 'Связь с вкладкой БАРС потеряна. Откройте расширение из нужной вкладки ещё раз. Уже отправленные записи повторно не сохраняйте.';
     async function callPage(binding, action, args = {}) {
         const results = await chrome.scripting.executeScript({
@@ -33,15 +43,21 @@
         const candidates = frames.filter(frame => frame.result?.ok && frame.result.patient?.key);
         if (candidates.length !== 1) throw new Error(candidates.length ? 'Карточка найдена в нескольких фреймах. Оставьте открытым один приём.' : (frames.find(f => f.result?.message)?.result.message || 'Откройте карточку пациента в БАРС.'));
         const frame = candidates[0];
-        const existing = await load(tabId);
-        if (existing?.run && ['uncertain', 'interrupted'].includes(existing.run.status)) throw new Error('Сначала проверьте прошлую отправку в БАРС и завершите её разбор в окне дневников.');
+        const active = await activeContext();
+        const previous = active ? await recover(active.tabId) : null;
+        const destination = await recover(tabId);
+        if (protectedRun(previous) || protectedRun(destination)) throw new Error('Сначала проверьте прошлую отправку в БАРС и завершите её разбор в окне дневников.');
+        // Keep only the last opened patient, including when BARS uses multiple tabs.
+        const existing = active ? previous : destination;
         const samePatient = !existing?.patient || existing.patient.key === frame.result.patient.key;
         const state = {
+            contextId: samePatient && active?.tabId === tabId && existing?.contextId ? existing.contextId : Core.uid(),
             binding: { tabId, frameId: frame.frameId, documentId: frame.documentId },
             patient: frame.result.patient, connectedAt: new Date().toISOString(),
             draft: samePatient ? existing?.draft || null : null, run: samePatient ? existing?.run || null : null
         };
-        await store(tabId, state);
+        await chrome.storage.session.set({ [key(tabId)]: state, [ACTIVE]: { tabId, contextId: state.contextId } });
+        if (active && active.tabId !== tabId) await chrome.storage.session.remove(key(active.tabId));
         return { ...state, probe: frame.result };
     }
     async function recover(tabId) {
@@ -181,9 +197,12 @@
     async function handle(message) {
         const tabId = message.tabId;
         if (!Number.isInteger(tabId) || tabId < 0) throw new Error('Не выбрана исходная вкладка БАРС. Откройте дневники кнопкой расширения.');
+        if (['draft', 'start', 'continue', 'clear'].includes(message.action)) await assertContext(tabId, message);
         if (message.action === 'load') {
             const stored = await chrome.storage.local.get([LIBRARY, SETTINGS]);
-            return { state: await recover(tabId), library: stored[LIBRARY] ? Core.cleanLibrary(stored[LIBRARY]) : Core.emptyLibrary(), settings: stored[SETTINGS] || {} };
+            const active = await activeContext();
+            const state = await recover(tabId);
+            return { state: active && active.tabId !== tabId && !protectedRun(state) ? null : state, library: stored[LIBRARY] ? Core.cleanLibrary(stored[LIBRARY]) : Core.emptyLibrary(), settings: stored[SETTINGS] || {} };
         }
         if (message.action === 'connect') return { state: await connect(tabId) };
         if (message.action === 'saveSettings') {
@@ -224,6 +243,7 @@
                 await callPage(state.binding, 'release', { checkedInBars: message.checkedInBars === true }).catch(() => undefined);
             }
             await chrome.storage.session.remove(key(tabId));
+            if ((await activeContext())?.tabId === tabId) await chrome.storage.session.remove(ACTIVE);
             return { cleared: true };
         }
         throw new Error('Неизвестная команда дневников.');
@@ -233,11 +253,9 @@
         if (sender.id !== chrome.runtime.id || !String(sender.url || '').startsWith(chrome.runtime.getURL(''))) {
             respond({ ok: false, error: 'Недопустимый источник команды.' }); return false;
         }
-        const previous = operations.get(message.tabId) || Promise.resolve();
-        const current = previous.catch(() => undefined).then(() => handle(message));
-        operations.set(message.tabId, current);
-        current.then(result => respond({ ok: true, ...result }), error => respond({ ok: false, error: error.message || publicError() }))
-            .finally(() => { if (operations.get(message.tabId) === current) operations.delete(message.tabId); });
+        const current = operations.catch(() => undefined).then(() => handle(message));
+        operations = current;
+        current.then(result => respond({ ok: true, ...result }), error => respond({ ok: false, error: error.message || publicError() }));
         return true;
     });
     chrome.tabs.onRemoved.addListener(tabId => {

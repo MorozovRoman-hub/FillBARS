@@ -16,7 +16,7 @@ function setup({session={},page={},gate}={}){
     }}};
     const context=vm.createContext({chrome,FillBARSCardCore:C,Map,Promise,Date,console});
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../diary-background.js'),'utf8'),context);
-    const send=(action,data={},sender={id:'test',url:'chrome-extension://test/diaries.html'})=>new Promise(resolve=>listener({namespace:'fillbars-card-v1',tabId:1,action,...data},sender,resolve));
+    const send=(action,data={},sender={id:'test',url:'chrome-extension://test/diaries.html'})=>new Promise(resolve=>listener({namespace:'fillbars-card-v1',tabId:1,contextId:session['cardSessionV1:'+(data.tabId??1)]?.contextId,action,...data},sender,resolve));
     return {send,session,calls,requests,patient};
 }
 function validRow(time='08:00'){
@@ -65,11 +65,11 @@ test('остановка во время подготовки не отправ�
     await app.send('stop');release();
     assert.equal((await finished(app)).run.status,'stopped');assert(!app.calls.includes('save'));
 });
-test('demo и неподтверждённые записи отклоняются фоновым обработчиком, а не только UI',async()=>{
-    const app=setup();await app.send('connect');const row=validRow();row.demo=true;
-    assert.equal((await app.send('start',{rows:[row]})).ok,false);
-    row.demo=false;row.reviewed=false;
+test('подобранные значения отправляются только после подтверждения в фоновом обработчике',async()=>{
+    const app=setup();await app.send('connect');const row=validRow();row.vitals=C.sampleVitals(C.DEFAULTS,C.DEFAULT_SPREAD);row.reviewed=false;
     assert.equal((await app.send('start',{rows:[row]})).ok,false);assert(!app.calls.includes('save'));
+    row.reviewed=true;assert.equal((await app.send('start',{rows:[row]})).ok,true);
+    assert.equal((await finished(app)).run.status,'done');
 });
 test('посторонняя страница не может прислать команду отправки',async()=>{
     const app=setup();const response=await app.send('start',{rows:[validRow()]},{id:'test',url:'http://fixture.invalid'});

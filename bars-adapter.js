@@ -1,7 +1,7 @@
 (function initializeFillBARSAdapter(globalScope) {
     'use strict';
 
-    const VERSION = '5.2.5';
+    const VERSION = '5.2.6';
     const ORDER_FORM_SELECTOR = '.dirline_order_alt';
     const GRID_GROUPS_SELECTOR = '[name="GridGroups"]';
     const GRID_RESEARCH_SELECTOR = '[name="GridResearch"]';

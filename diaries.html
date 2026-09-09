@@ -27,7 +27,7 @@
       <aside class="schedule">
         <div class="section-heading"><div><span class="eyebrow">РАСПИСАНИЕ</span><h2>Записи <span id="rowCount" class="count">1</span></h2></div><button id="clearDraft" class="icon-button" title="Очистить черновик" aria-label="Очистить черновик"><svg aria-hidden="true"><use href="diary-icons.svg#trash"></use></svg></button></div>
         <label for="profile">Шаблон выбранной записи</label><select id="profile"><option value="">Без шаблона</option></select>
-        <p id="profileHint" class="hint">Без шаблона новое время копирует тексты и показатели выбранной записи.</p>
+        <p id="profileHint" class="hint">Без шаблона новое время копирует тексты выбранной записи и показатели последней записи.</p>
         <div id="rowList" class="row-list" aria-label="Подготовленные дневники"></div>
         <button id="addTime" class="primary wide"><svg aria-hidden="true"><use href="diary-icons.svg#plus"></use></svg>Добавить время</button>
         <div class="step-row"><label for="hourStep">Шаг, часов</label><input id="hourStep" type="number" min="1" max="24" value="4"></div>
@@ -41,8 +41,9 @@
           <div class="datetime">
             <div><label for="date">Дата осмотра</label><input id="date" type="date" required></div>
             <div><label for="time">Время</label><input id="time" type="time" required></div>
-            <div class="inherit-note">Новое время наследует показатели выбранной записи.</div>
+            <div class="inherit-note">Новое время наследует показатели последней записи.</div>
           </div>
+          <div class="text-heading"><strong>Показатели</strong><button id="anotherVitals" class="text-button" type="button"><svg aria-hidden="true"><use href="diary-icons.svg#shuffle"></use></svg>Подобрать показатели</button></div>
           <div class="vitals">
             <div><label for="temperature">Температура <span>°C</span></label><input id="temperature" inputmode="text" autocomplete="off" aria-describedby="vitalsHint"></div>
             <div><label for="pressure">АД <span>мм рт. ст.</span></label><input id="pressure" inputmode="text" placeholder="120/80" autocomplete="off"></div>
@@ -63,7 +64,7 @@
     </div>
   </main>
   <footer class="action-bar">
-    <div><strong id="readyCount">Проверено 0 из 1</strong><span id="storageNote">Черновик сохраняется до перезапуска браузера. Шаблоны — постоянно.</span></div>
+    <div><strong id="readyCount">Проверено 0 из 1</strong><span id="storageNote">Черновик сохраняется при повторном открытии того же пациента и сбрасывается при смене пациента.</span></div>
     <div class="footer-buttons"><button id="fillOnly" class="secondary">Заполнить выбранную без сохранения</button><button id="sendAll" class="primary"><svg aria-hidden="true"><use href="diary-icons.svg#check"></use></svg>Записать дневники в БАРС</button></div>
   </footer>
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
@@ -77,10 +78,10 @@
       <div><label for="settingsPulse">ЧСС <span>в минуту</span></label><input id="settingsPulse" maxlength="67" value="80"></div>
       <div><label for="settingsRespiration">ЧДД <span>в минуту</span></label><input id="settingsRespiration" maxlength="67" value="16"></div>
     </div>
-    <p class="hint">Перед отправкой укажите фактические показатели осмотра. Следующее время копирует показатели выбранной записи.</p>
-    <details class="demo-settings">
-      <summary>Учебный разброс показателей</summary>
-      <p class="hint">Пример рассчитывается от числовых исходных значений выше. Чем дальше от исходного значения, тем ниже вероятность. Учебные записи в БАРС не отправляются.</p>
+    <p class="hint">Перед отправкой проверьте показатели. Следующая запись наследует значения последней записи с учётом настройки разброса.</p>
+    <details class="spread-settings">
+      <summary>Разброс показателей</summary>
+      <p class="hint">Подбор моделирует показатели манекена. Первая запись — в пределах разброса от исходных значений; следующие — от показателей последней записи. Чем дальше от исходного значения, тем ниже вероятность.</p>
       <div class="spread-grid">
         <label>Температура ±<input id="spreadTemperature" type="number" min="0" max="0.3" step="0.1" value="0.3"></label>
         <label>Систолическое ±<input id="spreadSystolic" type="number" min="0" max="20" step="1" value="20"></label>
@@ -88,7 +89,8 @@
         <label>ЧСС ±<input id="spreadPulse" type="number" min="0" max="20" step="1" value="10"></label>
         <label>ЧДД ±<input id="spreadRespiration" type="number" min="0" max="2" step="1" value="2"></label>
       </div>
-      <button id="addDemo" class="secondary">Создать демонстрационный пример</button>
+      <label class="review-check"><input id="autoPickVitals" type="checkbox"><span>Автоматически подбирать показатели для новых записей</span></label>
+      <p class="hint">Если выключено, первая запись получает исходные показатели, следующие наследуют последние введённые значения. Кнопка «Подобрать показатели» работает по нажатию.</p>
     </details>
     <div id="settingsError" class="errors" role="alert" hidden></div>
     <div class="settings-footer"><button id="saveSettings" class="primary">Сохранить настройки</button></div>

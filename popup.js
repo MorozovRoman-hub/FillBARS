@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.5';
+const EXTENSION_VERSION = '5.2.6';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};

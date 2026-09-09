@@ -31,7 +31,7 @@ test('демонстрационный разброс ограничен и со
     const spread={temperature:.3,systolic:20,diastolic:20,pulse:10,respiration:2};
     const counts={near:0,far:0};
     for(let i=0;i<4000;i++){
-        const x=C.sampleDemo(C.DEFAULTS,spread);
+        const x=C.sampleVitals(C.DEFAULTS,spread);
         const [s,d]=C.pressure(x.pressure);
         assert(s>=100&&s<=140&&d>=60&&d<=100&&s>d);
         assert(Math.abs(C.number(x.temperature)-36.6)<.301);
@@ -40,13 +40,12 @@ test('демонстрационный разброс ограничен и со
     }
     assert(counts.near>counts.far*5);
 });
-test('будущее время разрешено, но подтверждение и запрет демонстрационных записей сохраняются',()=>{
+test('подобранные показатели манекена требуют подтверждения перед отправкой',()=>{
     const row=C.createRow({date:'2026-09-01',time:'08:00'});
     row.diary='Проверенный текст';
     assert(C.validateRow(row,{forSending:true}).some(e=>e.field==='reviewed'));
-    row.reviewed=true;row.demo=true;
-    assert(C.validateRow(row,{forSending:true}).some(e=>e.field==='demo'));
-    row.demo=false;row.date='2099-01-01';
+    row.vitals=C.sampleVitals(C.DEFAULTS,C.DEFAULT_SPREAD);
+    row.reviewed=true;row.date='2099-01-01';
     assert.deepEqual(C.validateRow(row,{forSending:true}),[]);
 });
 
@@ -91,10 +90,11 @@ test('свободная запись копирует все три текст�
     b.diary='Другая запись';b.vitals.pulse='80';assert.equal(a.diary,'Ручной дневник');assert.equal(a.vitals.pulse,'60 + ЭКС');
 });
 
-test('копирование учебной записи сохраняет запрет отправки',()=>{
-    const a={...C.createRow({demo:true}),diary:'Учебный текст'};
-    const b=C.createRow({previous:a});b.reviewed=true;
-    assert.equal(b.demo,true);assert(C.validateRow(b,{forSending:true}).some(error=>error.field==='demo'));
+test('наследование подобранных показателей не наследует подтверждение',()=>{
+    const a={...C.createRow({autoPick:true}),diary:'Модельный текст',reviewed:true};
+    const b=C.createRow({previous:a});
+    assert.deepEqual(b.vitals,a.vitals);assert.equal(b.reviewed,false);
+    assert(C.validateRow(b,{forSending:true}).some(error=>error.field==='reviewed'));
 });
 
 const genderProfile=()=>({id:'p',name:'Учебный шаблон',genderPairs:[{id:'1',male:'больного',female:'больной'},{id:'2',male:'пациент',female:'пациентка'}],variants:[
@@ -198,4 +198,42 @@ test('настройки сохраняют свободный текст и н�
     assert.throws(()=>C.cleanSettings({hourStep:1.5}),/целое/);
     assert.throws(()=>C.cleanSettings({spread:{systolic:21}}),/границы/);
     assert.throws(()=>C.cleanSettings({defaults:{temperature:'x'.repeat(68)}}),/67/);
+});
+
+test('автоподбор выключен по умолчанию, сохраняется явно и требует числовую основу',()=>{
+    assert.equal(C.cleanSettings().autoPick,false);
+    assert.equal(C.cleanSettings({autoPick:true}).autoPick,true);
+    assert.equal(C.cleanSettings({autoPick:'false'}).autoPick,false);
+    assert.throws(()=>C.cleanSettings({autoPick:true,defaults:{pulse:'60 + ЭКС'}}),/числовые/);
+});
+
+test('автоподбор первой записи использует исходные значения, следующих — предыдущие правки',()=>{
+    const random=()=>.1;
+    const first=C.createRow({autoPick:true,random});
+    assert.notDeepEqual(first.vitals,C.DEFAULTS);
+    first.vitals.pulse='120';
+    const snapshot=C.clone(first);
+    const next=C.createRow({previous:first,defaults:C.DEFAULTS,autoPick:true,random});
+    assert(Number(next.vitals.pulse)>=110 && Number(next.vitals.pulse)<=130);
+    assert.notEqual(next.vitals.pulse,'120');assert.deepEqual(first,snapshot);
+    const inherited=C.createRow({previous:first,defaults:C.DEFAULTS,autoPick:false});
+    assert.equal(inherited.vitals.pulse,'120');assert.notStrictEqual(inherited.vitals,first.vitals);
+});
+
+test('нулевой разброс не меняет значения; серия остаётся в границах каждого предыдущего значения',()=>{
+    const zero=Object.fromEntries(Object.keys(C.DEFAULT_SPREAD).map(key=>[key,0]));
+    assert.deepEqual(C.sampleVitals(C.DEFAULTS,zero),C.DEFAULTS);
+    let seed=12345;
+    const random=()=>((seed=(1664525*seed+1013904223)>>>0)/4294967296);
+    let base={...C.DEFAULTS};
+    for(let i=0;i<500;i++){
+        const next=C.sampleVitals(base,C.DEFAULT_SPREAD,random);
+        const oldBP=C.pressure(base.pressure),newBP=C.pressure(next.pressure);
+        assert(Math.abs(C.number(next.temperature)-C.number(base.temperature))<=.300001);
+        assert(Math.abs(Number(next.pulse)-Number(base.pulse))<=10);
+        assert(Math.abs(Number(next.respiration)-Number(base.respiration))<=2);
+        assert(Math.abs(newBP[0]-oldBP[0])<=20 && Math.abs(newBP[1]-oldBP[1])<=20);
+        assert.deepEqual(C.validateVitals(next),[]);
+        base=next;
+    }
 });

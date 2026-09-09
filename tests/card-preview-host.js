@@ -8,11 +8,11 @@ const profile = { id:'preview-general',name:'Послеоперационное 
 let library=JSON.parse(localStorage.getItem('cardPreviewLibrary')||'null')||{type:'fillbars-card-templates',version:1,profiles:[profile]};
 let settings=C.cleanSettings(JSON.parse(localStorage.getItem('cardPreviewSettings')||'{}'));
 const now=C.dateParts(new Date(Date.now()-86400000));
-let initial=C.createRow({profile,...now});initial.demo=true;
+let initial=C.createRow({profile,...now,defaults:settings.defaults,autoPick:settings.autoPick,spread:settings.spread});
 let state=JSON.parse(sessionStorage.getItem('cardPreviewState')||'null')||{patient:{key:'preview',fullName:'Учебная карточка',birth:'Демонстрационные данные',history:'ДЕМО / 001'},draft:{rows:[initial],defaults:{...C.DEFAULTS},profileId:profile.id,hourStep:4},run:null};
 const recoveryPreview=new URLSearchParams(location.search).get('scenario')==='recovery';
 if(recoveryPreview){
-    const rows=['18:00','22:00'].map(time=>({...C.createRow({profile,...now,time}),demo:true}));
+    const rows=['18:00','22:00'].map(time=>C.createRow({profile,...now,time}));
     state={patient:{key:'preview',fullName:'Учебная карточка',birth:'Демонстрационные данные',history:'ДЕМО / 001'},draft:{rows,defaults:{...C.DEFAULTS},profileId:profile.id,hourStep:4},run:{id:'preview-recovery',status:'uncertain',phase:'saving',index:0,rows:C.clone(rows),results:[],message:'Учебный сценарий: первая запись сохранена, ожидается подтверждение.',updatedAt:1}};
 }
 window.cardPreviewRequest=async message=>{

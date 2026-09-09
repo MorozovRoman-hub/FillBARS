@@ -3,9 +3,10 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {JSDOM}=require('jsdom');
 const C=require('../diary-core');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function setup({state,library,settings={},failConnect=false,otherState,statusGate,continueResult}={}){
+async function setup({state,library,settings={},failConnect=false,otherState,statusGate,continueResult,random}={}){
     const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../diaries.html'),'utf8'),{url:'https://extension.invalid/diaries.html?tab=1',runScripts:'outside-only'});
     const win=dom.window;
+    if(random)win.Math.random=random;
     let poll;
     win.setInterval=fn=>{poll=fn;return 0;};
     win.confirm=()=>true;
@@ -175,11 +176,21 @@ test('экспорт журнала содержит этапы, но исклю
     for(const value of ['Конфиденциальный','Не экспортировать','private-key','private-history'])assert(!content.includes(value));
     app.dom.window.close();
 });
-test('демонстрационная запись не допускает подтверждения и заполнения',async()=>{
-    const app=await setup();app.$('openSettings').click();app.$('addDemo').click();await pause(20);
-    assert.equal(app.$('reviewed').disabled,true);assert.equal(app.$('fillOnly').disabled,true);
-    assert.equal(app.$('rowBadge').textContent,'Демонстрация');app.dom.window.close();
+test('одна кнопка подбирает все показатели, не меняя тексты и соседние записи',async()=>{
+    const app=await setup({random:()=>.1});
+    try{
+        app.input('diary','Текст манекена');app.$('reviewed').click();
+        const before=C.vitalFields.map(field=>app.$(field).value);
+        app.$('anotherVitals').click();
+        assert(C.vitalFields.every((field,i)=>app.$(field).value!==before[i]));
+        assert.equal(app.$('diary').value,'Текст манекена');assert.equal(app.$('rowCount').textContent,'1');
+        assert.equal(app.$('reviewed').checked,false);assert.equal(app.$('reviewed').disabled,false);
+        assert.equal(app.$('addDemo'),null);
+        await pause(400);
+        assert.equal(app.state.draft.rows[0].reviewed,false);
+    }finally{app.dom.window.close();}
 });
+
 test('название заболевания не интерпретируется как HTML',async()=>{
     const library={type:'fillbars-card-templates',version:1,profiles:[{id:'x',name:'<img src=x onerror=alert(1)>',variants:[]}]};
     const app=await setup({library});app.$('manageTemplates').click();
@@ -221,7 +232,7 @@ test('настройки находятся в отдельном окне, со
     try{
         app.input('diary','Не менять этот текст');
         assert.equal(app.$('spreadTemperature').closest('dialog').id,'settingsDialog');
-        assert.equal(app.win.document.querySelector('.editor .demo-settings'),null);
+        assert.equal(app.win.document.querySelector('.editor .spread-settings'),null);
         app.$('openSettings').click();assert.equal(app.$('settingsHourStep').value,'4');
         app.input('settingsTemperature','37,1');app.input('settingsPulse','60 + ЭКС');app.input('spreadSystolic','12');
         app.$('saveSettings').click();await pause(20);
