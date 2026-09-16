@@ -3,6 +3,53 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const Hidden = require('../diary-hidden-adapter');
+test('сбой загрузки второй карточки не создаёт осмотров ни в одном контексте', async () => {
+    const s = setup(); let cards = 0, mutations = 0;
+    const foreground = { patientContext: () => ({ key: 'patient1', card: s.w.document.getElementById('card') }), execute: async () => ({ ok: true }) };
+    const factory = { create: () => {
+        const index = cards++;
+        return { patientContext: () => { if (index === 1) throw Object.assign(new Error('fixture'), { code: 'patient_card' }); return { key: 'patient1' }; }, execute: async () => { mutations++; return { ok: true }; } };
+    } };
+    try {
+        const adapter = Hidden.create({ window: s.w, foreground, factory, timeout: 10 });
+        const result = await adapter.execute({ action: 'parallel', items: [0,1,2].map(i => ({ ...s.args, row: { id: 'row' + i } })) });
+        assert.equal(cards, 3); assert.equal(mutations, 0);
+        assert.equal(result.noWrites, true); assert.equal(result.uncertain, false);
+        assert.equal(result.results[1].code, 'background_loading_card');
+        assert.ok(result.trace.some(e => e.row === 2 && e.at === 'card' && e.identityError === 'patient_card'));
+        assert.equal(s.w.document.querySelector('iframe'), null);
+    } finally { s.dom.window.close(); }
+});
+test('группы из 1–3 записей ждут подготовки всех участников перед сохранением', async () => {
+    for (const size of [1,2,3]) for (const failedIndex of size > 1 ? [-1, 1] : [-1]) {
+        const s = setup();
+        let created = 0, prepared = 0, saves = 0;
+        const factory = { create: () => {
+            const index = created++;
+            return { patientContext: () => ({ key: 'patient1' }), execute: async r => {
+                if (r.action === 'prepare') {
+                    await new Promise(resolve => setTimeout(resolve, 3 + index * 7)); prepared++;
+                    if (index === failedIndex) return { ok: false, message: 'fixture failure' };
+                    return { ok: true };
+                }
+                assert.equal(prepared, size); saves++;
+                return { ok: true, verified: true, recordId: 'record' + index };
+            } };
+        } };
+        const foreground = { patientContext: () => ({ key: 'patient1', card: s.w.document.getElementById('card') }), execute: async () => ({ ok: true }) };
+        const adapter = Hidden.create({ window: s.w, foreground, factory });
+        try {
+            const items = Array.from({length:size},(_,i) => ({ ...s.args, row: { id: 'row' + i } }));
+            const result = await adapter.execute({ action: 'parallel', items });
+            assert.equal(created, size); assert.equal(result.results.length, size);
+            assert.equal(saves, failedIndex < 0 ? size : 0);
+            assert.equal(result.uncertain, failedIndex >= 0);
+            assert.equal(result.trace.filter(e => e.stage === 'Запуск сохранения').length, saves);
+            if (failedIndex >= 0) assert.equal((await adapter.execute({ action: 'parallel', items })).code, 'save_uncertain');
+            assert.equal((await adapter.execute({ action: 'release', checkedInBars: true })).ok, true);
+        } finally { s.dom.window.close(); }
+    }
+});
 function onWorker(window, initialize) {
     const append = window.document.body.append.bind(window.document.body);
     window.document.body.append = host => {

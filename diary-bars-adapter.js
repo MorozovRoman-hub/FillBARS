@@ -1,6 +1,6 @@
 (function (global) {
     'use strict';
-    const VERSION = '1.0.3';
+    const VERSION = '1.0.4';
     if (global.FillBARSCardAdapter?.version === VERSION) return;
     const FIELD_NAMES = ['VISIT_DATE', 'VISIT_TIME', 'TEMPERATURE', 'AD', 'THSS', 'THD', 'S_DNEVNIK', 'STAC_PLAN', 'RECOMEND_CONS'];
     const EDITOR = '[cmptype="Form"][formname="UniversalTemplate/UniversalTemplate"]';
@@ -204,17 +204,40 @@
             checkContext(context);
             return grid;
         }
+        async function openServicePicker(context) {
+            const grid = await ensureList(context);
+            const scope = grid.closest('[cmptype="Form"]') || windowRoot(grid);
+            let stableSince = 0, lastButton = null;
+            const button = await wait(() => {
+                checkContext(context);
+                const candidates = exactText(scope, 'Провести осмотр');
+                if (candidates.length !== 1) { stableSince = 0; return null; }
+                const node = candidates[0], control = node.closest('[cmptype="Button"],button,[role="button"]') || node;
+                const page = pageFor(control);
+                const disabled = control.disabled || control.getAttribute('enabled') === 'false' || control.getAttribute('aria-disabled') === 'true' || /(?:ctrl_disable|btn-disable)/.test(control.className) || control.getAttribute('aria-busy') === 'true' || (typeof page?.form?.requestsCount === 'number' && page.form.requestsCount > 0);
+                if (disabled) { stableSince = 0; return null; }
+                if (control !== lastButton || !stableSince) { lastButton = control; stableSince = Date.now(); }
+                return Date.now() - stableSince >= settleMs ? control : null;
+            }, 'Кнопка «Провести осмотр» не стала доступна после загрузки списка.');
+            checkContext(context);
+            inPage(pageFor(button), () => button.click());
+            record('Нажата доступная кнопка «Провести осмотр»');
+            const opened = await wait(() => {
+                checkContext(context);
+                const direct = editor(true);
+                if (direct) return { form: direct };
+                const entries = all(document, 'tr[cmptype="GridRow"]').filter(el => visible(el) && !el.closest('[name="GRID_DIRECTION_OBSERVATIONS"]') && Array.from(el.querySelectorAll('td,span')).some(cell => normalize(cell.textContent) === 'Дневник врача'));
+                return entries.length ? { selection: unique(entries, 'service_ambiguous', 'В выборе услуги несколько одинаковых дневников. Выберите нужный вручную.') } : null;
+            }, 'Не найден «Дневник врача» в выборе услуг. Откройте новый приём вручную.');
+            record(opened.form ? 'БАРС сразу открыл редактор приёма' : 'Выбор услуги загружен, «Дневник врача» найден');
+            return opened;
+        }
         async function ensureNew(context) {
             let form = editor(true);
             if (form) return readyEditor(context, true, form);
-            const grid = await ensureList(context);
-            const scope = grid.closest('[cmptype="Form"]') || windowRoot(grid);
-            clickText(scope, 'Провести осмотр');
-            record('Открыт выбор услуги');
-            const selection = await wait(() => {
-                const entries = all(document, 'tr[cmptype="GridRow"]').filter(el => visible(el) && !el.closest('[name="GRID_DIRECTION_OBSERVATIONS"]') && Array.from(el.querySelectorAll('td,span')).some(cell => normalize(cell.textContent) === 'Дневник врача'));
-                return entries.length ? unique(entries, 'service_ambiguous', 'В выборе услуги несколько одинаковых дневников. Выберите нужный вручную.') : null;
-            }, 'Не найден «Дневник врача» в выборе услуг. Откройте новый приём вручную.');
+            const opened = await openServicePicker(context);
+            if (opened.form) return readyEditor(context, true, opened.form);
+            const selection = opened.selection;
             checkContext(context);
             selection.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
             selection.click();
@@ -342,6 +365,7 @@
             try {
                 let result;
                 if (request.action === 'probe') result = await probe();
+                else if (request.action === 'probeService') { const opened = await openServicePicker(checkContext(request.context)); result = { serviceFound: !!opened.selection, directEditor: !!opened.form }; }
                 else if (request.action === 'prepare') result = await prepare(request);
                 else if (request.action === 'save') result = await save(request);
                 else if (request.action === 'release') {

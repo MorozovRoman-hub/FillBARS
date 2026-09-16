@@ -235,6 +235,45 @@
             await checkpoint(run.phase, error instanceof StorageQuotaError ? storageMessage : publicError()).catch(() => undefined);
         } finally { running.delete(tabId); }
     }
+    async function runParallel(tabId, state) {
+        const run = state.run;
+        try {
+            for (let offset = 0; offset < run.rows.length; offset += 3) {
+                const batch = run.rows.slice(offset, offset + 3);
+                run.index = offset; run.batchSize = batch.length;
+                if (running.get(tabId)?.stop) {
+                    run.status = 'stopped'; run.phase = 'stopped'; run.message = 'Очередь остановлена. Остальные дневники остались в черновике.';
+                    await store(tabId, state); return;
+                }
+                run.phase = 'saving';
+                run.message = 'Параллельная отправка записей ' + (offset + 1) + '–' + (offset + batch.length) + ' из ' + run.rows.length;
+                // Persist uncertainty for ALL rows before a worker may create a direction.
+                await store(tabId, state);
+                const result = await callPage(state.binding, 'parallel', { items: batch.map(row => ({ runId: run.id, context: state.patient, row, values: Core.fields(row) })) });
+                run.trace = [...run.trace, ...(result.trace || []).map(entry => compactTrace(entry, offset + entry.row))].slice(-MAX_TRACE_ENTRIES);
+                const receipts = result.results || [];
+                for (const row of batch) {
+                    const receipt = receipts.find(item => item.rowId === row.id);
+                    if (receipt?.ok && receipt.verified) recordSaved(state, row, receipt);
+                }
+                const ids = run.results.map(item => item.recordId);
+                const complete = result.ok && run.results.length === offset + batch.length && ids.every(Boolean) && new Set(ids).size === ids.length;
+                run.status = complete ? 'running' : result.noWrites === true ? 'failed' : 'uncertain';
+                run.phase = complete ? 'verified' : result.noWrites === true ? 'preparing' : 'saving';
+                run.message = complete ? 'Подтверждено дневников: ' + run.results.length + ' из ' + run.rows.length : 'Проверьте записи текущей группы в БАРС. Автоматического повтора нет. Скачайте журнал перед сбросом.';
+                if (result.noWrites === true) run.message = 'Не все карточки группы загрузились. Создание осмотров этой группы не запускалось. Скачайте журнал загрузки.';
+                run.updatedAt = Date.now();
+                await store(tabId, state);
+                if (!complete) return;
+                }
+            run.status = 'done'; run.phase = 'done'; run.message = 'Все дневники подтверждены: ' + run.results.length + '.'; run.updatedAt = Date.now();
+            await store(tabId, state);
+        } catch {
+            run.status = 'uncertain'; run.phase = 'saving'; run.updatedAt = Date.now();
+            run.message = 'Связь или сохранение состояния прервались. Проверьте записи текущей группы в БАРС; не отправляйте их повторно.';
+            await store(tabId, state).catch(() => undefined);
+        } finally { running.delete(tabId); }
+    }
     async function start(tabId, message) {
         const state = await recover(tabId);
         if (!state?.binding) throw new Error('Откройте карточку пациента и нажмите «Дневники» в расширении.');
@@ -244,6 +283,8 @@
         const errors = Core.validateQueue(rows, { forSending: true });
         if (errors.length) throw new Error('Запись ' + (errors[0].index + 1) + ': ' + errors[0].message);
         assertRowIds(rows);
+        const parallel = !message.fillOnly && message.parallel !== false && rows.length > 1;
+        if (new Set(rows.map(row => row.date + '|' + row.time)).size !== rows.length) throw new Error('Укажите разные даты и время для дневников очереди.');
         if (message.fillOnly && rows.length !== 1) throw new Error('Для заполнения без сохранения выберите одну запись.');
         const savedIds = new Set((state.draft?.rows || []).filter(row => row.status === 'saved').map(row => row.id));
         if (rows.some(row => savedIds.has(row.id))) throw new Error('В очереди есть уже сохранённая запись.');
@@ -256,15 +297,17 @@
             const released = await callPage(state.binding, 'release');
             if (!released.ok) throw new Error(released.message || 'Сначала проверьте предыдущую запись в БАРС.');
         }
-        state.run = { id: Core.uid(), status: 'running', phase: 'starting', index: 0, rows, fillOnly: !!message.fillOnly, results: [], trace: [], updatedAt: Date.now(), message: 'Запуск очереди' };
+        state.run = { id: Core.uid(), status: 'running', phase: 'starting', index: 0, rows, parallel, fillOnly: !!message.fillOnly, results: [], trace: [], updatedAt: Date.now(), message: 'Запуск очереди' };
         running.set(tabId, { stop: false });
         try { await store(tabId, state); } catch (error) { running.delete(tabId); throw error; }
-        void runQueue(tabId, state, !!message.fillOnly);
+        if (parallel) void runParallel(tabId, state);
+        else void runQueue(tabId, state, !!message.fillOnly);
         return state;
     }
     async function continueQueue(tabId, message) {
         const state = await recover(tabId);
         const run = state?.run;
+        if (run?.parallel) throw new Error('Проверьте записи текущей группы, скачайте журнал и сбросьте очередь после проверки. Автоматическое продолжение неопределённой группы недоступно.');
         if (running.has(tabId)) throw new Error('Очередь уже продолжается.');
         if (!state?.binding || !run || run.id !== message.runId || !['uncertain', 'interrupted'].includes(run.status)) throw new Error('Состояние очереди изменилось. Дождитесь обновления окна.');
         const current = run.rows[run.index || 0];

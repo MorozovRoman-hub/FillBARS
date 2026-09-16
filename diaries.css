@@ -15,3 +15,5 @@
 @media(max-width:1050px){.header-actions{flex-direction:column;align-items:stretch}.gender-pair{grid-template-columns:repeat(2,minmax(0,1fr))}.pair-actions{grid-column:1/-1}}
 @media(max-width:700px){.header-actions{flex-direction:row}.header-actions button{padding:8px;font-size:11px}.app-header{gap:10px}.gender-choice{flex-wrap:wrap}}
 @media(max-width:480px){.app-header{grid-template-columns:1fr}.header-patient{grid-row:auto;grid-column:auto}.header-actions{grid-row:2}.gender-pair{grid-template-columns:1fr}.pair-actions{grid-column:auto}}
+
+.footer-buttons{flex-wrap:wrap}

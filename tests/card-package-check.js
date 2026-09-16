@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.json'),'utf8'));
-assert.equal(manifest.version,'5.2.7');
+assert.equal(manifest.version,'5.2.8');
 assert.equal(manifest.manifest_version,3);
 assert.equal(manifest.minimum_chrome_version,'109');
 assert.deepEqual(manifest.permissions,['activeTab','scripting','storage']);

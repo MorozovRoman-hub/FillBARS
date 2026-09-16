@@ -167,7 +167,7 @@
         $('runProgress').max = run.rows?.length || 1;
         $('runProgress').value = run.results?.length || 0;
         $('stop').hidden = !running();
-        $('resolveRun').hidden = !unresolved();
+        $('resolveRun').hidden = !unresolved() || !!run.parallel;
         $('resolveRun').disabled = busy;
         $('discardRun').hidden = !unresolved();
         $('discardRun').disabled = busy;
@@ -175,7 +175,9 @@
         const current = run.rows?.[run.index || 0];
         const pending = (run.rows || []).filter(item => !run.results?.some(result => result.rowId === item.id));
         const confirming = run.phase === 'saving';
-        if (confirming && current) {
+        if (run.parallel) {
+            $('runRecovery').textContent = 'Проверьте записи ' + ((run.index || 0) + 1) + '–' + ((run.index || 0) + (run.batchSize || 3)) + ' в БАРС: дату, время, текст и показатели. Скачайте журнал перед сбросом. Автоматического продолжения неопределённой группы нет.';
+        } else if (confirming && current) {
             const remaining = pending.filter(item => item.id !== current.id).length;
             $('runRecovery').textContent = 'Проверьте в БАРС запись ' + ((run.index || 0) + 1) + ' за ' + C.barsDate(current.date) + ' в ' + current.time + '. Если она сохранена, подтвердите кнопкой ниже. ' + (remaining ? 'Затем отправятся остальные записи: ' + remaining + '. Текущая повторно не отправится.' : 'Это последняя запись. Подтверждение завершит очередь.') + ' Черновики останутся в окне.';
             $('resolveRun').textContent = remaining ? 'Запись сохранена — продолжить' : 'Запись сохранена — завершить';
@@ -193,7 +195,7 @@
         const run = state?.run;
         if (!run?.trace?.length) return;
         // Export technical events only; never export patient identity, rows or their texts.
-        const data = { format: 'fillbars-card-log-v1', version: window.chrome?.runtime?.getManifest?.().version || 'preview', status: run.status, phase: run.phase, code: run.code || '', events: run.trace };
+        const data = { format: 'fillbars-card-log-v1', version: window.chrome?.runtime?.getManifest?.().version || 'preview', build: window.chrome?.runtime?.getManifest?.().version_name || '', parallel: !!run.parallel, status: run.status, phase: run.phase, code: run.code || '', events: run.trace };
         const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = 'fillbars-card-log.json'; link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -412,7 +414,7 @@
     $('fillOnly').addEventListener('click', () => send(true));
     $('sendAll').addEventListener('click', () => send(false));
     $('stop').addEventListener('click', async () => {
-        try { await request('stop'); $('stop').disabled = true; $('runMessage').textContent = 'Остановка запрошена. Текущее сохранение, если уже началось, будет проверено.'; }
+        try { await request('stop'); $('stop').disabled = true; $('runMessage').textContent = 'Остановка запрошена. Текущая группа завершится; следующая не начнётся.'; }
         catch (error) { message(error.message, true); }
     });
     async function clear(checkedInBars = false) {
