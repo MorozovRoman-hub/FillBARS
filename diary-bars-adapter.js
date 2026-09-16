@@ -1,6 +1,6 @@
 (function (global) {
     'use strict';
-    const VERSION = '1.0.2';
+    const VERSION = '1.0.3';
     if (global.FillBARSCardAdapter?.version === VERSION) return;
     const FIELD_NAMES = ['VISIT_DATE', 'VISIT_TIME', 'TEMPERATURE', 'AD', 'THSS', 'THD', 'S_DNEVNIK', 'STAC_PLAN', 'RECOMEND_CONS'];
     const EDITOR = '[cmptype="Form"][formname="UniversalTemplate/UniversalTemplate"]';
@@ -9,7 +9,7 @@
     class AdapterError extends Error {
         constructor(code, message) { super(message); this.code = code; }
     }
-    function create({ document = global.document, window = global, timeout = 18000, interval = 140, settleMs = 700, isVisible } = {}) {
+    function create({ document = global.document, window = global, timeout = 18000, interval = 140, settleMs = 700, isVisible, guard = () => {} } = {}) {
         let trace = [];
         const record = (stage, details = {}) => {
             trace.push({ time: new Date().toISOString(), stage, ...details });
@@ -49,6 +49,7 @@
                 candidates = candidates.filter(el => !candidates.some(other => other !== el && el.contains(other)));
             }
             const element = unique(candidates, 'ambiguous_action', 'Не удалось однозначно найти «' + label + '». Откройте нужное окно БАРС вручную.');
+            guard();
             element.click();
             return element;
         }
@@ -86,6 +87,7 @@
             return { card, fullName, birth, history, key: [compact(fullName), birth, compact(history)].join('|') };
         }
         function checkContext(expected) {
+            guard();
             const context = patientContext();
             if (!expected?.key || context.key !== expected.key) fail('patient_changed', 'Карточка пациента или госпитализация изменилась. Откройте нужную карточку и начните новый черновик.');
             return context;
@@ -357,5 +359,5 @@
     const api = { version: VERSION, create, FIELD_NAMES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     global.FillBARSCardAdapter = api;
-    if (global.document) global.__FillBARSCardPage = create();
+    if (global.document && !global.frameElement?.hasAttribute('data-fillbars-background')) global.__FillBARSCardPage = create();
 })(typeof window !== 'undefined' ? window : globalThis);

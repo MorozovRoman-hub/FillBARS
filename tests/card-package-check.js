@@ -11,7 +11,7 @@ for(const asset of [...Object.values(manifest.icons || {}), ...Object.values(man
     assert(!asset.startsWith('./') && !asset.includes('\\'), 'Icon path must match ZIP entry exactly: '+asset);
     assert(fs.existsSync(path.join(root,asset)), 'Missing manifest icon: '+asset);
 }
-for(const file of ['diary-core.js','diary-background.js','diary-bars-adapter.js','diary-launch.js','diary-window.js','diaries.js','background.js','browser-compat.js']){
+for(const file of ['diary-core.js','diary-background.js','diary-bars-adapter.js','diary-hidden-adapter.js','diary-launch.js','diary-window.js','diaries.js','background.js','browser-compat.js']){
     new vm.Script(fs.readFileSync(path.join(root,file),'utf8'),{filename:file});
 }
 for(const html of ['popup.html','diaries.html']){

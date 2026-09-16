@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_FILES = '''manifest.json background.js browser-compat.js badger.png bars-adapter.js
 blood-request.css blood-request.html blood-request.js diaries.css diaries.html diaries.js
-diary-background.js diary-bars-adapter.js diary-core.js diary-icons.svg diary-launch.js diary-window.js
+diary-background.js diary-bars-adapter.js diary-hidden-adapter.js diary-core.js diary-icons.svg diary-launch.js diary-window.js
 drug-catalog-zhvnlp-2025.json fill-runner.js fillbars-config.json office-export.js office-templates.js
 popup.html popup.js print.css print.html print.js transfusion.css transfusion.html transfusion.js LICENSE'''.split()
 

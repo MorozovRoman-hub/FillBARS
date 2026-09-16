@@ -130,7 +130,7 @@
     }
     async function connect(tabId) {
         if (running.has(tabId)) throw new Error('Сначала остановите текущую очередь.');
-        await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', files: ['diary-bars-adapter.js'] });
+        await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', files: ['diary-bars-adapter.js', 'diary-hidden-adapter.js'] });
         const frames = await chrome.scripting.executeScript({
             target: { tabId, allFrames: true }, world: 'MAIN',
             func: async () => globalThis.__FillBARSCardPage ? globalThis.__FillBARSCardPage.execute({ action: 'probe' }) : null
@@ -196,7 +196,7 @@
                 run.index = index;
                 if (control.stop) { run.status = 'stopped'; await checkpoint('stopped', 'Очередь остановлена. Неотправленные записи остались в черновиках.'); return; }
                 await checkpoint('preparing', 'Подготовка дневника ' + (index + 1) + ' из ' + run.rows.length);
-                const args = { runId: run.id, context: state.patient, row, values: Core.fields(row) };
+                const args = { runId: run.id, context: state.patient, row, values: Core.fields(row), fillOnly };
                 const prepared = await callPage(state.binding, 'prepare', args);
                 appendTrace(prepared);
                 if (!prepared.ok) {
@@ -206,7 +206,7 @@
                 if (fillOnly || control.stop) {
                     await callPage(state.binding, 'release');
                     run.status = fillOnly ? 'filled' : 'stopped';
-                    await checkpoint('prepared', fillOnly ? 'Поля заполнены. Приём оставлен открытым, сохранение выполните в БАРС.' : 'Очередь остановлена. Текущий приём заполнен, но не сохранён.');
+                    await checkpoint('prepared', fillOnly ? 'Поля заполнены. Приём оставлен открытым, сохранение выполните в БАРС.' : 'Очередь остановлена до создания приёма. Черновики сохранены.');
                     return;
                 }
                 // Persist the saving checkpoint before any request can create a record.

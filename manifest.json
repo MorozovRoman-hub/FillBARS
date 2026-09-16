@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "FillBARS Card — назначения и дневники",
   "version": "5.2.7",
+  "version_name": "5.2.7 background test 3",
   "description": "Назначения и дневники МИС БАРС: шаблоны, предпросмотр и последовательное заполнение.",
   "minimum_chrome_version": "109",
   "icons": {

@@ -1,0 +1,573 @@
+{
+  "capturedOn": "2026-09-16",
+  "containsClinicalValues": false,
+  "note": "Only structural metadata. Empty responseShape.actions does not establish success or returned visit ID.",
+  "creation": {
+    "method": "POST",
+    "path": "/action.php",
+    "queryKeys": [
+      "Form",
+      "modal",
+      "baseForm",
+      "theme",
+      "cache",
+      "cache_enabled",
+      "session_cache",
+      "FormCache"
+    ],
+    "form": "ArmPatientsInDep/Wrappers/direction_observations",
+    "time": "2026-09-16T03:04:47.271Z",
+    "fields": [
+      "SERVICE_ID_g0",
+      "DISEASECASE_g1",
+      "HH_DEP_ID_g2",
+      "PATIENT_ID_g3",
+      "PAYMENT_KIND_ID_g10",
+      "Action"
+    ],
+    "actions": [
+      "execDirectionObservations"
+    ],
+    "status": 200,
+    "responseShape": {
+      "root": "Action",
+      "actions": [],
+      "hasError": false,
+      "parseError": false
+    }
+  },
+  "saveSequence": [
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:06.336Z",
+      "fields": [
+        "pnDIRECTION_SERVICE_g0",
+        "Action"
+      ],
+      "actions": [
+        "CHECK_BEFORE_VISIT_SAVE_ACTION"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:06.434Z",
+      "fields": [
+        "DS_ID_g0",
+        "DISEASECASE_ID_g1",
+        "DISEASECASE_ID_CTRL_g3",
+        "Action"
+      ],
+      "actions": [
+        "checkProfCardServDC"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:06.512Z",
+      "fields": [
+        "DIR_SERVICE_g1",
+        "PATIENT_g2",
+        "VISIT_DATE_g3",
+        "CHECK_STEP_g7",
+        "Action"
+      ],
+      "actions": [
+        "checkSaveProfCardHelthGroup"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:06.677Z",
+      "fields": [
+        "AGENT_ID_g0",
+        "Action"
+      ],
+      "actions": [
+        "getSOValues"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:06.829Z",
+      "fields": [
+        "AGENT_ID_g0",
+        "CheckDiagToArms_g1",
+        "CheckDiagToSecurity_g2",
+        "CheckDiagToDetective_g3",
+        "USE_NETRIKA_g4",
+        "DIRECTION_ID_g5",
+        "DIR_SERVICE_g6",
+        "PATIENT_g8",
+        "Action"
+      ],
+      "actions": [
+        "checkForDiagOptions"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:06.980Z",
+      "fields": [
+        "DIRECTION_SERVICE_g0",
+        "Action"
+      ],
+      "actions": [
+        "checkDispService"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/getmultiaction.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:07.102Z",
+      "fields": [
+        "act0[Form]",
+        "act0[service]",
+        "act0[template_id]",
+        "act0[modal]",
+        "act0[PATIENT_ID_g1]",
+        "act0[SERVICE_g2]",
+        "act0[CABLAB_g4]",
+        "act0[ACTION_g5]",
+        "act0[DIRECTION_SERVICE_g6]",
+        "act0[DISEASECASE_g7]",
+        "act0[VISIT_SIGN_g8]",
+        "act0[VISIT_TO_AT_g9]",
+        "act0[EMPLOYER_g10]",
+        "act0[CLOSE_DISEASECASE_g11]",
+        "act0[MINUTES_g12]",
+        "act0[TEMPLATE_ID_g13]",
+        "act0[templateprev_g16]",
+        "act0[SAVE_VU_TEMPL_g17]",
+        "act0[AGENT_g24]",
+        "act0[VISIT_DATEB_g26]",
+        "act0[VISIT_DATE_g34]",
+        "act0[VISIT_TIME_g35]",
+        "act0[DOM_g37]",
+        "act0[VISIT_PURPOSE_g39]",
+        "act0[TEMPERATURE_g40]",
+        "act0[AD_g41]",
+        "act0[THSS_g42]",
+        "act0[THD_g43]",
+        "act0[S_DNEVNIK_g44]",
+        "act0[RECOMEND_CONS_g47]",
+        "act0[Cont_Fill_82638112_DEL]",
+        "act0[Cont_Fill_82638114_DEL]",
+        "act0[Cont_Fill_82638112_UPD]",
+        "act0[Cont_Fill_82638114_UPD]",
+        "act0[Cont_Fill_82638112_ADD]",
+        "act0[Cont_Fill_82638114_ADD]",
+        "act0[Action]",
+        "act0[_sysid]",
+        "act1[Form]",
+        "act1[service]",
+        "act1[template_id]",
+        "act1[modal]",
+        "act1[v_6]",
+        "act1[v_5]",
+        "act1[v_7]",
+        "act1[Action]",
+        "act1[_sysid]"
+      ],
+      "actions": [
+        "FILL_ACTION",
+        "LAST_FILL_ACTION"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "multidata",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:07.556Z",
+      "fields": [
+        "gDIR_SERV",
+        "Action"
+      ],
+      "actions": [
+        "getMkbCode"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/getdata.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:07.971Z",
+      "fields": [
+        "DataSet",
+        "gDIR_SERV"
+      ],
+      "actions": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:08.125Z",
+      "fields": [
+        "VISIT_ID_g0",
+        "SERVICE_ID_g1",
+        "AGENT_g2",
+        "Action"
+      ],
+      "actions": [
+        "checkVimisAkineo"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:08.280Z",
+      "fields": [
+        "VISIT_ID_g0",
+        "AGENT_g1",
+        "Action"
+      ],
+      "actions": [
+        "checkIKBR"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:08.536Z",
+      "fields": [
+        "ID_g0",
+        "Action"
+      ],
+      "actions": [
+        "checkSpepEris"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "service",
+        "template_id",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "UniversalTemplate/UniversalTemplate",
+      "time": "2026-09-16T03:05:08.784Z",
+      "fields": [
+        "pnVISIT_ID_g0",
+        "pnDIRECTION_SERVICE_g1",
+        "pnAGENT_g2",
+        "psACTION_g3",
+        "Action"
+      ],
+      "actions": [
+        "checkEmergNotify"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/action.php",
+      "queryKeys": [
+        "Form",
+        "modal",
+        "baseForm",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "ArmPatientsInDep/Wrappers/direction_observations",
+      "time": "2026-09-16T03:05:09.076Z",
+      "fields": [
+        "var1",
+        "Action"
+      ],
+      "actions": [
+        "deleteDirectionObservationsAfterVisit"
+      ],
+      "status": 200,
+      "responseShape": {
+        "root": "Action",
+        "actions": [],
+        "hasError": false,
+        "parseError": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/getdata.php",
+      "queryKeys": [
+        "Form",
+        "modal",
+        "theme",
+        "cache",
+        "cache_enabled",
+        "session_cache",
+        "FormCache"
+      ],
+      "form": "ArmPatientsInDep/Wrappers/direction_observations",
+      "time": "2026-09-16T03:05:09.123Z",
+      "fields": [
+        "DataSet",
+        "mode",
+        "v1",
+        "v2",
+        "v3",
+        "v4",
+        "_srt[VISIT_DATE_SORT]",
+        "_c",
+        "_s",
+        "_pageNum",
+        "Value",
+        "oldPageLocateValue"
+      ],
+      "actions": [],
+      "status": 200
+    }
+  ]
+}
