@@ -14,6 +14,21 @@ async function setup(options={}){
     const args={runId:'run-test',context:probe.patient,row,values:C.fields(row)};
     return {dom,fixture,adapter,args};
 }
+test('выбор услуги ждёт включения кнопки после загрузки списка', async()=>{
+    const {dom,fixture,adapter,args}=await setup();
+    try {
+        fixture.openList();
+        const button=[...dom.window.document.querySelectorAll('button')].find(e=>e.textContent==='Провести осмотр');
+        button.classList.add('ctrl_disable');
+        let disabledClicks=0;
+        button.addEventListener('click',()=>{if(button.classList.contains('ctrl_disable'))disabledClicks++;});
+        dom.window.setTimeout(()=>button.classList.remove('ctrl_disable'),35);
+        const result=await adapter.execute({...args,action:'probeService'});
+        assert.equal(result.ok,true,result.message);assert.equal(result.serviceFound,true);
+        assert.equal(disabledClicks,0);assert.equal(fixture.saveClicks,0);
+        assert.equal(dom.window.document.querySelector('[formname="UniversalTemplate/UniversalTemplate"]'),null);
+    } finally {dom.window.close();}
+});
 test('полный цикл двух дневников подтверждается строками списка без контекстного меню и повторного открытия',async()=>{
     const {dom,fixture,adapter,args}=await setup({noContextMenu:true});
     for(let i=0;i<2;i++){

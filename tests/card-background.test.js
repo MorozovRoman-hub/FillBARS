@@ -31,12 +31,73 @@ function setup({session={},page={},gate,sessionQuota=10*1024*1024,localQuota=10*
     }}};
     const context=vm.createContext({chrome,FillBARSCardCore:C,Map,Promise,Date,console});
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../diary-background.js'),'utf8'),context);
-    const send=(action,data={},sender={id:'test',url:'chrome-extension://test/diaries.html'})=>new Promise(resolve=>listener({namespace:'fillbars-card-v1',tabId:1,contextId:session['cardSessionV1:'+(data.tabId??1)]?.contextId,action,...data},sender,resolve));
+    const send=(action,data={},sender={id:'test',url:'chrome-extension://test/diaries.html'})=>new Promise(resolve=>listener({namespace:'fillbars-card-v1',tabId:1,contextId:session['cardSessionV1:'+(data.tabId??1)]?.contextId,action,parallel:false,...data},sender,resolve));
     return {send,session,local,calls,requests,patient,sessionArea,localArea};
 }
 function validRow(time='08:00'){
     const row=C.createRow({date:'2026-09-01',time});row.diary='Учебный дневник';row.reviewed=true;return row;
 }
+test('параллельная группа получает общий saving checkpoint и три независимые квитанции',async()=>{
+    let app;
+    app=setup({page:{parallel:request=>{
+        const run=app.session['cardSessionV1:1'].run;
+        assert.equal(run.phase,'saving');assert.equal(run.parallel,true);
+        assert.equal(request.items.length,3);
+        return {ok:true,results:request.items.map((item,i)=>({rowId:item.row.id,ok:true,verified:true,recordId:'parallel'+i})),trace:[{time:new Date().toISOString(),row:2,stage:'Запуск сохранения'}]};
+    }}});
+    await app.send('connect');const rows=[validRow(),validRow('09:00'),validRow('10:00')];
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:true});
+    const state=await finished(app);
+    assert.equal(state.run.status,'done');assert.equal(state.run.results.length,3);
+    assert.equal(state.run.trace[0].row,2);assert.equal(app.calls.filter(c=>c==='parallel').length,1);
+    assert.equal(app.calls.includes('save'),false);
+});
+test('неполный параллельный результат не разрешает продолжение одной строки или повтор группы',async()=>{
+    const app=setup({page:{parallel:r=>({ok:true,results:[{rowId:r.items[0].row.id,ok:true,verified:true,recordId:'only-one'}]})}});
+    await app.send('connect');const rows=[validRow(),validRow('09:00'),validRow('10:00')];
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:true});
+    const state=await finished(app);assert.equal(state.run.status,'uncertain');
+    assert.equal(state.run.results.length,1);
+    assert.equal((await app.send('continue',{runId:state.run.id,rowId:rows[0].id,checkedInBars:true})).ok,false);
+    assert.equal((await app.send('start',{rows,parallel:true})).ok,false);
+    assert.equal(app.calls.filter(c=>c==='parallel').length,1);
+});
+test('один дневник отправляется обычным одиночным циклом',async()=>{
+    const app=setup();await app.send('connect');
+    assert.equal((await app.send('start',{rows:[validRow()],parallel:true})).ok,true);
+    assert.equal((await finished(app)).run.status,'done');
+    assert.equal(app.calls.includes('parallel'),false);
+});
+test('обычный запуск пяти дневников отправляет группы 3+2 и сохраняет квитанции перед следующей группой',async()=>{
+    const sizes=[]; let app;
+    app=setup({page:{parallel:r=>{
+        if(sizes.length)assert.equal(app.session['cardSessionV1:1'].run.results.length,3);
+        sizes.push(r.items.length);
+        return {ok:true,results:r.items.map(item=>({rowId:item.row.id,ok:true,verified:true,recordId:item.row.id}))};
+    }}});
+    await app.send('connect');const rows=['08:00','09:00','10:00','11:00','12:00'].map(validRow);
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:undefined});
+    const state=await finished(app);
+    assert.deepEqual(sizes,[3,2]);assert.equal(state.run.status,'done');assert.equal(state.run.results.length,5);
+    assert(state.draft.rows.every(row=>row.status==='saved'));
+});
+test('ошибка первой параллельной группы не запускает следующую',async()=>{
+    const app=setup({page:{parallel:()=>({ok:true,results:[]})}});
+    await app.send('connect');const rows=['08:00','09:00','10:00','11:00'].map(validRow);
+    await app.send('start',{rows,parallel:undefined});
+    assert.equal((await finished(app)).run.status,'uncertain');
+    assert.equal(app.calls.filter(c=>c==='parallel').length,1);
+});
+test('остановка завершает текущую группу и не отправляет следующую',async()=>{
+    let release; const gate=new Promise(resolve=>{release=resolve;});
+    const app=setup({page:{parallel:async r=>{await gate;return {ok:true,results:r.items.map(item=>({rowId:item.row.id,ok:true,verified:true,recordId:item.row.id}))};}}});
+    await app.send('connect');const rows=['08:00','09:00','10:00','11:00'].map(validRow);
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:undefined});
+    await app.send('stop');release();const state=await finished(app);
+    assert.equal(state.run.status,'stopped');assert.equal(state.run.results.length,3);
+    assert.equal(app.calls.filter(c=>c==='parallel').length,1);
+    assert.notEqual(state.draft.rows[3].status,'saved');
+});
 function denseRows(count){
     return Array.from({length:count},(_,index)=>{
         const row=validRow(String(index%24).padStart(2,'0')+':00');
