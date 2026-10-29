@@ -2,7 +2,9 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.json'),'utf8'));
-assert.equal(manifest.version,'5.2.8');
+assert.equal(manifest.version,'5.2.28');
+assert(fs.existsSync(path.join(root,'images/consent-operation-page-1.png')));
+assert(fs.existsSync(path.join(root,'images/consent-operation-page-2.png')));
 assert.equal(manifest.manifest_version,3);
 assert.equal(manifest.minimum_chrome_version,'109');
 assert.deepEqual(manifest.permissions,['activeTab','scripting','storage']);
@@ -31,8 +33,14 @@ for(const file of fs.readdirSync(root).filter(name=>/\.(html|css)$/.test(name)))
         assert(fs.existsSync(path.join(root,asset.split(/[?#]/)[0])),file+': missing CSS asset '+asset);
     }
 }
-assert(popup.indexOf('id="openDiaries"')>popup.indexOf('id="openTransfusionProtocol"'));
-assert(popup.indexOf('id="openDiaries"')<popup.indexOf('id="saveJournalEntry"'));
+assert(popup.indexOf('id="openDiaries"')>popup.indexOf('id="refreshKidney"'));
+const activePopup=popup.replace(/<!--[\s\S]*?-->/g,'');
+assert(activePopup.indexOf('id="profileSelect"')<activePopup.indexOf('id="medicalTemplate"'));
+assert(activePopup.indexOf('id="medicalTemplate"')<activePopup.indexOf('id="appointmentDate"'));
+assert(!activePopup.includes('id="openPrintSheet"')&&!activePopup.includes('id="openBloodRequest"')&&!activePopup.includes('id="openTransfusionProtocol"'));
+for(const option of ['printSheet','bloodRequest','transfusionProtocol'])assert(activePopup.includes(`value="${option}"`));
+assert(!activePopup.includes('id="saveJournalEntry"'));
+assert(!activePopup.includes('id="openJournal"'));
 const model=require('../diary-core');
 const adapter=require('../diary-bars-adapter');
 assert.deepEqual(adapter.FIELD_NAMES,Object.keys(model.fields({...model.createRow(),diary:'Текст'})));

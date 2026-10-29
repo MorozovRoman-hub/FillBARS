@@ -326,8 +326,8 @@
     };
 
     try {
-        assert(window.FillBARSAdapter?.version === '5.2.8',
-            'подключён production bars-adapter версии 5.2.8');
+        assert(window.FillBARSAdapter?.version === '5.2.13',
+            'подключён production bars-adapter версии 5.2.13');
         const adapter = window.FillBARSAdapter.create({ document, window });
         assert(adapter.findScheduleForm() === scheduleForm,
             'найдена видимая .form-schedule с GridServices');

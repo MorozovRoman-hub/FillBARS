@@ -3,7 +3,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {JSDOM}=require('jsdom');
 const C=require('../diary-core');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function setup({state,library,settings={},failConnect=false,otherState,statusGate,continueResult,draftResult,random}={}){
+async function setup({state,library,historyLibrary,settings={},failConnect=false,otherState,statusGate,continueResult,draftResult,random}={}){
     const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../diaries.html'),'utf8'),{url:'https://extension.invalid/diaries.html?tab=1',runScripts:'outside-only'});
     const win=dom.window;
     if(random)win.Math.random=random;
@@ -15,11 +15,12 @@ async function setup({state,library,settings={},failConnect=false,otherState,sta
     const row=C.createRow({date:'2026-09-01',time:'08:00'});
     let current=state||{patient:{key:'test',fullName:'Учебный пациент',birth:'01.01.1980',history:'ДЕМО'},draft:{rows:[row],defaults:{...C.DEFAULTS},profileId:'',hourStep:4},run:null};
     let lib=library||C.emptyLibrary();
+    let historyLib=historyLibrary||C.starterHistoryLibrary();
     const calls=[];
     let sourceListener;
     win.chrome={runtime:{id:'test',onMessage:{addListener:fn=>{sourceListener=fn;}},sendMessage:async message=>{
         calls.push(message);
-        if(message.action==='load'){if(message.tabId===2&&otherState)current=otherState;return {ok:true,state:current,library:lib,settings};}
+        if(message.action==='load'){if(message.tabId===2&&otherState)current=otherState;return {ok:true,state:current,library:lib,historyLibrary:historyLib,settings};}
         if(message.action==='connect'&&failConnect)return {ok:false,error:'Карточка закрыта'};
         if(message.action==='draft'){
             const result=draftResult?await draftResult(message,current):null;
@@ -29,6 +30,7 @@ async function setup({state,library,settings={},failConnect=false,otherState,sta
         if(message.action==='status'){const snapshot=JSON.parse(JSON.stringify(current));if(statusGate)await statusGate;return {ok:true,state:snapshot};}
         if(message.action==='continue'&&continueResult){const result=await continueResult(message,current);if(result.state)current=result.state;return result;}
         if(message.action==='saveLibrary'){lib=C.cleanLibrary(message.library);return {ok:true,library:lib};}
+        if(message.action==='saveHistoryLibrary'){historyLib=C.cleanHistoryLibrary(message.historyLibrary);return {ok:true,historyLibrary:historyLib};}
         if(message.action==='saveSettings'){settings=C.cleanSettings(message.settings);return {ok:true,settings};}
         return {ok:true,state:current};
     }}};
@@ -37,8 +39,23 @@ async function setup({state,library,settings={},failConnect=false,otherState,sta
     const $=id=>win.document.getElementById(id);
     const input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new win.Event('input',{bubbles:true}));};
     const source=tabId=>new Promise(resolve=>sourceListener({namespace:'fillbars-card-ui-v1',action:'source',tabId},{id:'test'},resolve));
-    return {dom,win,$,input,calls,source,poll:()=>poll(),get state(){return current;},get library(){return lib;},get settings(){return settings;}};
+    return {dom,win,$,input,calls,source,poll:()=>poll(),get state(){return current;},get library(){return lib;},get historyLibrary(){return historyLib;},get settings(){return settings;}};
 }
+test('starter history creates four unreviewed drafts at relative dates without sending',async()=>{
+    const app=await setup();
+    try{
+        app.$('manageHistory').click();
+        app.input('historyFirstDate','2026-10-01');app.input('historyFirstTime','17:05');
+        app.$('applyHistory').click();await pause(30);
+        const rows=app.state.draft.rows;
+        assert.deepEqual(rows.map(item=>[item.date,item.time]),[['2026-10-01','17:05'],['2026-10-02','09:30'],['2026-10-03','09:30'],['2026-10-04','09:30']]);
+        assert(rows[0].diary.includes('Готовиться на колоноскопию.'));
+        assert(rows[1].diary.includes('На колоноскопии хронический внутренний геморрой 2 ст.'));
+        assert.equal(rows[1].treatment,'гемостатическая терапия');
+        assert(rows.every(item=>!item.reviewed&&item.status==='draft'&&Object.values(item.vitals).every(value=>value==='')));
+        assert(!app.calls.some(call=>call.action==='start'));
+    }finally{app.dom.window.close();}
+});
 test('редактирование сбрасывает подтверждение и новые записи наследуют изменённые показатели',async()=>{
     const app=await setup();
     app.input('diary','Учебный текст');app.$('reviewed').click();assert.equal(app.$('reviewed').checked,true);

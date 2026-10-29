@@ -24,7 +24,7 @@ const bloodRequestHtml = read('blood-request.html');
 const bloodRequestJs = read('blood-request.js');
 const version = manifest.version;
 
-assert(version === '5.2.8', `unexpected manifest version: ${version}`);
+assert(version === '5.2.28', `unexpected manifest version: ${version}`);
 assert(popup.includes(`const EXTENSION_VERSION = '${version}'`), 'popup version is not synchronized');
 assert(popup.includes('loadedManifestVersion !== EXTENSION_VERSION')
     && popup.includes('Загружена смешанная версия')
@@ -78,7 +78,7 @@ assert(popup.includes("document.querySelectorAll('#Profile .info > section')")
     && popup.includes("getVar('EMP_NAME')")
     && popup.includes("getVar('LPU_NAME')")
     && popup.includes('medicalOrganization: sanitizeMedicalOrganization(patientData.medicalOrganization)')
-    && popup.includes('doctorName: formatDoctorName(patientData.doctorName)'),
+    && popup.includes('doctorName: formatDoctorName(selectedDoctor?.fullName || patientData.doctorName)'),
     'BARS profile organization/doctor sources are not connected to the print payload');
 assert(popup.includes('openTransfusionProtocol')
     && popup.includes('transfusion.html?payload=')
@@ -100,8 +100,8 @@ assert(popup.includes('openTransfusionProtocol')
     && transfusionJs.includes("setValue('transfusionDoctor', patient.doctorName)")
     && transfusionHtml.includes('id="exportWordButton"')
     && transfusionHtml.includes('id="exportExcelButton"')
-    && transfusionHtml.includes('office-templates.js?v=5.2.8')
-    && transfusionHtml.includes('office-export.js?v=5.2.8')
+    && transfusionHtml.includes('office-templates.js?v=5.2.28')
+    && transfusionHtml.includes('office-export.js?v=5.2.28')
     && transfusionJs.includes('buildExportValues')
     && transfusionJs.includes('downloadDocx')
     && transfusionJs.includes('downloadXlsx')
@@ -110,17 +110,19 @@ assert(popup.includes('openTransfusionProtocol')
     && officeExportJs.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     && transfusionJs.includes('globalScope.__FillBARSTransfusionProtocol__'),
     'interactive transfusion protocol contract is incomplete');
-const documentActionSplitStart = popupHtml.indexOf('class="document-action-split"');
-const documentActionSplitEnd = popupHtml.indexOf('</div>', documentActionSplitStart);
-const printSheetButton = popupHtml.indexOf('id="openPrintSheet"', documentActionSplitStart);
-const bloodRequestButton = popupHtml.indexOf('id="openBloodRequest"', documentActionSplitStart);
-const transfusionProtocolButton = popupHtml.indexOf('id="openTransfusionProtocol"', documentActionSplitStart);
-assert(documentActionSplitStart >= 0
-    && documentActionSplitEnd > documentActionSplitStart
-    && printSheetButton > documentActionSplitStart
-    && bloodRequestButton > printSheetButton
-    && transfusionProtocolButton > bloodRequestButton
-    && transfusionProtocolButton < documentActionSplitEnd
+assert(popupHtml.includes('id="refreshKidney"')
+    && popupHtml.includes('class="kidney-lab-row"')
+    && popupHtml.includes('id="hemoglobinResult"')
+    && popupHtml.includes('id="glucoseResult"')
+    && popupHtml.includes('src="lab-markers.js"')
+    && popupHtml.includes('value="printSheet"')
+    && popupHtml.includes('value="bloodRequest"')
+    && popupHtml.includes('value="transfusionProtocol"')
+    && popup.includes('readKidneyDataFromActiveBars')
+    && popup.includes("files:['kidney-bars-adapter.js']")
+    && popup.includes("if(template==='printSheet')await openPrintSheetForSelectedProfile()")
+    && popup.includes("else if(template==='bloodRequest')await openBloodRequest()")
+    && popup.includes('else await openTransfusionProtocol()')
     && popup.includes('openBloodRequest')
     && popup.includes('blood-request.html?payload=')
     && bloodRequestHtml.includes('ЗАЯВКА НА КОМПОНЕНТЫ КРОВИ')

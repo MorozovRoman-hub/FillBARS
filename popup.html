@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>МИС БАРС - назначения</title>
+    <link rel="stylesheet" href="lab-trends.css">
     <style>
         * {
             box-sizing: border-box;
@@ -189,6 +190,16 @@
             border-bottom: 1px solid #d8dee5;
         }
 
+        .selector-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .selector-row .section {
+            min-width: 0;
+        }
+
         .field-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -230,6 +241,29 @@
         .document-action-split button:last-child {
             border-radius: 0 4px 4px 0;
         }
+
+        .kidney-panel{border:1px solid #cbd9d1;border-radius:7px;padding:10px;background:#f8fbf9;font-size:12px}
+        .kidney-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700}
+        .kidney-head button{padding:5px 8px;font-size:11px}
+        .kidney-lab-row{display:grid;grid-template-columns:minmax(0,2.4fr) repeat(2,minmax(0,1fr));gap:7px;margin-top:7px;align-items:stretch}
+        .kidney-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;border-radius:5px;background:#e9efeb}
+        .kidney-result{padding:6px;min-height:66px;min-width:0}
+        #egfrResult{border-right:1px solid #cbd9d1}
+        .kidney-result strong{display:block;font-size:19px;line-height:1.2}
+        .kidney-result small{display:block;font-size:9px;line-height:1.2;overflow-wrap:anywhere}
+        .kidney-result.g1{color:#176c3a}.kidney-result.g2{color:#5a6422}
+        .kidney-result.g3a{color:#785018}.kidney-result.g3b{color:#934616}
+        .kidney-result.g4{color:#9f251d}.kidney-result.g5{color:#7f111b}
+        .lab-result{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;min-width:0;padding:6px;border-radius:5px;background:#e9efeb;font-size:10px}
+        .lab-result strong{font-size:19px;line-height:1.2;white-space:nowrap}.lab-result small{font-size:9px;white-space:nowrap}
+        .lab-result.hb-low{background:#f7a9a9;color:#7f111b}.lab-result.hb-borderline{background:#ffddb7;color:#934616}
+        .lab-result.glucose-low,.lab-result.glucose-high{background:#f7a9a9;color:#7f111b}
+        .lab-result.glucose-borderline{background:#ffddb7;color:#934616}
+        .kidney-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:8px}
+        .kidney-details{margin-top:7px}.kidney-details summary{cursor:pointer;color:#315b48;font-size:11px}
+        .kidney-brief{font-size:10px;color:#64756b;margin-left:4px}.kidney-brief.warning{color:#a05a1b}
+        .kidney-inputs label{margin:0;font-size:10px}.kidney-inputs input,.kidney-inputs select{width:100%;padding:5px;margin-top:2px;font-size:12px}
+        .kidney-note{margin:7px 0 0;color:#58695e;font-size:10px;line-height:1.3}
 
         .warning {
             width: 66.666%;
@@ -455,7 +489,7 @@
 </head>
 <body>
     <header class="app-header">
-        <h3>FillBARS Card</h3>
+        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.28</small></h3>
         <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
     </header>
 
@@ -468,11 +502,39 @@
         Перед назначением анализов убедитесь, что в БАРС отображаются все нужные исследования. Финальное сохранение назначений выполните в БАРС.
     </div>
 
-    <div class="section">
-        <label for="profileSelect">Профиль назначений</label>
-        <select id="profileSelect">
-            <option value="">-- Выберите профиль --</option>
-        </select>
+    <div class="selector-row">
+        <div class="section">
+            <label for="profileSelect">Профиль назначений</label>
+            <select id="profileSelect">
+                <option value="">-- Выберите профиль --</option>
+            </select>
+        </div>
+        <div class="section">
+            <label for="medicalTemplate">Бланки</label>
+            <select id="medicalTemplate" aria-label="Открыть медицинский бланк">
+                <option value="">Выберите бланк…</option>
+                <option value="printSheet">Лист назначений</option>
+                <option value="bloodRequest">Заявка на компоненты крови</option>
+                <option value="transfusionProtocol">Протокол гемотрансфузии</option>
+                <option value="military">Выписка для военнослужащих</option>
+                <option value="commission">Заключение врачебной комиссии</option>
+                <option value="referral">Направление 057/у-04</option>
+                <option value="skt">Направление на СКТ</option>
+                <option value="oncology">Впервые выявленное новообразование</option>
+                <option value="tmk">Телемедицинская консультация (Excel)</option>
+                <option value="operationConsent">Согласие на операцию</option>
+                <option value="anesthesiaConsent">Согласие на анестезию</option>
+                <option value="colonoscopyConsent">Согласие на колоноскопию</option>
+                <option value="bronchoscopyConsent">Согласие на бронхоскопию</option>
+                <option value="gastroscopyConsent">Согласие на гастроскопию</option>
+                <option value="thrombolysisConsent">Согласие на тромболизис</option>
+                <option value="operationProtocol">Протокол операции</option>
+                <option value="workInjury315">Медицинское заключение 315-1/у</option>
+                <option value="workInjury316">Медицинское заключение 316-1/у</option>
+                <option value="epidemicInvestigation">Карта эпидемиологического расследования</option>
+                <option value="centralCatheter">Протокол катетеризации центральной вены</option>
+            </select>
+        </div>
     </div>
 
     <div class="section">
@@ -482,21 +544,43 @@
 
     <div class="button-stack">
         <button id="fillForm" type="button">✅ Открыть лабораторию и заполнить</button>
-        <div class="document-action-split" aria-label="Печатные документы">
-            <button id="openPrintSheet" class="secondary" type="button" title="Лист назначений">🖨 Лист назначений</button>
-            <button id="openBloodRequest" class="secondary" type="button" title="Заявка на компоненты крови">🩸 Заявка</button>
-            <button id="openTransfusionProtocol" class="secondary" type="button" title="Протокол трансфузии">Протокол</button>
+        <div class="kidney-panel" aria-label="СКФ, клиренс, гемоглобин и глюкоза">
+            <div class="kidney-head"><span>СКФ и анализы</span><button id="refreshKidney" class="secondary" type="button">Обновить из БАРС</button></div>
+            <div class="kidney-lab-row">
+                <div class="kidney-results" aria-label="СКФ по CKD-EPI и клиренс по Кокрофту—Голту">
+                    <div id="egfrResult" class="kidney-result"><small>СКФ CKD‑EPI 2021</small><strong>—</strong><small>мл/мин/1,73 м²</small></div>
+                    <div id="crclResult" class="kidney-result"><small>Клиренс Кокрофта—Голта</small><strong>—</strong><small>мл/мин</small></div>
+                </div>
+                <div id="hemoglobinResult" class="lab-result"><span>Гемоглобин</span><strong>—</strong><small>г/л</small></div>
+                <div id="glucoseResult" class="lab-result"><span>Глюкоза</span><strong>—</strong><small>ммоль/л</small></div>
+            </div>
+            <details class="kidney-details"><summary>Исходные данные и ручная проверка <span id="kidneyBrief" class="kidney-brief">Проверьте данные</span></summary>
+            <div class="kidney-inputs">
+                <label>Пол<select id="kidneySex"><option value="">Не найден</option><option value="male">Мужской</option><option value="female">Женский</option></select></label>
+                <label>Возраст, лет<input id="kidneyAge" type="number" min="18" max="120" inputmode="numeric"></label>
+                <label>Масса тела, кг<input id="kidneyWeight" type="number" min="2" max="400" step="0.1" inputmode="decimal"></label>
+                <label>Креатинин<input id="kidneyCreatinine" type="number" min="0.1" step="0.1" inputmode="decimal"></label>
+                <label>Единица креатинина<select id="kidneyUnit"><option value="мкмоль/л">мкмоль/л</option><option value="ммоль/л">ммоль/л</option><option value="мг/дл">мг/дл</option></select></label>
+                <label>Гемоглобин, г/л<input id="kidneyHemoglobin" type="number" min="1" step="0.1" inputmode="decimal"></label>
+                <label>Глюкоза, ммоль/л<input id="kidneyGlucose" type="number" min="0.1" step="0.01" inputmode="decimal"></label>
+            </div>
+            <p id="kidneySource" class="kidney-note" role="status">Данные ещё не получены.</p>
+            <p class="kidney-note">Категория G1–G5 — только по СКФ. Один анализ не подтверждает хроническую болезнь почек; проверьте дату и единицы креатинина. Цвет гемоглобина — ориентир по заданным порогам, не решение о переливании. Цвет глюкозы — ориентир для анализа натощак: &lt;3,9 или ≥7,0 — красный, 5,6–6,9 — оранжевый; если кровь сдана не натощак, оцените результат по условиям анализа и референсу лаборатории.</p>
+            </details>
+            <details class="lab-trends"><summary>Динамика анализов</summary><div id="labTrends" aria-live="polite"><p class="trend-note">Обновите данные из БАРС, чтобы увидеть динамику.</p></div></details>
         </div>
         <button id="openDiaries" type="button" style="display:flex;align-items:center;justify-content:center;gap:8px;background:#267c51"><svg width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="diary-icons.svg#diary"></use></svg>Дневники</button>
+        <!-- Временно скрыто: журнал назначений сохраняется в коде до возобновления функции.
         <button id="saveJournalEntry" class="secondary" type="button">💾 Сохранить в журнал</button>
         <button id="openJournal" class="ghost" type="button">📚 Журнал назначений</button>
+        -->
         <button id="closePopup" class="close-btn" type="button">✖ Закрыть</button>
     </div>
 
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.2.8 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.2.28 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
@@ -515,6 +599,26 @@
                 <input id="markUrgentCheckbox" type="checkbox">
                 <span>Отмечать CITO («Срочно») у выбранных анализов</span>
             </label>
+        </div>
+
+        <div class="section">
+            <h4>Врач для бланков</h4>
+            <p class="hint">Выбранный врач подставляется в бланки вместо врача из БАРС. Данные хранятся только в этом браузере.</p>
+            <label for="doctorSelect">Сохранённый врач</label>
+            <select id="doctorSelect"><option value="">Врач из БАРС</option></select>
+            <label for="doctorFullName">Фамилия, имя, отчество</label>
+            <input id="doctorFullName" type="text" maxlength="160" autocomplete="name" placeholder="Морозов Роман Владимирович">
+            <label for="doctorPosition">Должность</label>
+            <input id="doctorPosition" type="text" maxlength="160" placeholder="Врач-хирург">
+            <label for="doctorPhone">Телефон</label>
+            <input id="doctorPhone" type="tel" maxlength="80" autocomplete="tel">
+            <label for="doctorEmail">Электронная почта</label>
+            <input id="doctorEmail" type="email" maxlength="160" autocomplete="email">
+            <div class="button-stack">
+                <button id="saveDoctor" class="secondary" type="button">Сохранить врача</button>
+                <button id="newDoctor" class="ghost" type="button">Добавить другого врача</button>
+                <button id="deleteDoctor" class="danger" type="button">Удалить выбранного</button>
+            </div>
         </div>
 
         <div class="section">
@@ -692,6 +796,9 @@
     </div>
 
     <script src="browser-compat.js"></script>
+    <script src="kidney-function.js"></script>
+    <script src="lab-markers.js"></script>
+    <script src="lab-trends.js"></script>
     <script src="popup.js"></script>
     <script src="diary-launch.js"></script>
 </body>

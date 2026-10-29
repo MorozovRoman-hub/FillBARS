@@ -13,6 +13,7 @@
         return response;
     }
     let library = C.emptyLibrary();
+    let historyLibrary = C.starterHistoryLibrary();
     let settings = C.cleanSettings();
     let state = null;
     const newDraft = () => ({ rows: [C.createRow({ defaults: settings.defaults, autoPick: settings.autoPick, spread: settings.spread })], defaults: { ...settings.defaults }, profileId: '', hourStep: settings.hourStep, gender: 'auto' });
@@ -372,7 +373,7 @@
                 const loaded = await request('load', { tabId: sourceTabId });
                 tabId = sourceTabId;
                 history.replaceState(null, '', '?tab=' + tabId);
-                state = loaded.state; library = C.cleanLibrary(loaded.library); settings = C.cleanSettings(loaded.settings); connected = false;
+                state = loaded.state; library = C.cleanLibrary(loaded.library); historyLibrary = C.upgradeStarterHistoryLibrary(loaded.historyLibrary); settings = C.cleanSettings(loaded.settings); connected = false;
                 lastRunVersion = state?.run?.id + ':' + state?.run?.updatedAt + ':' + state?.run?.status;
                 acceptRemoteDraft(state?.draft, { resetSelection: true });
             } finally { busy = false; render(); }
@@ -606,6 +607,108 @@
         } catch (error) { $('templateError').textContent = 'Импорт не выполнен: ' + error.message; $('templateError').hidden = false; }
         finally { $('importFile').value = ''; }
     });
+    let editHistoryLibrary = null;
+    let historyId = '';
+    let historyDirty = false;
+    const currentHistory = () => editHistoryLibrary?.templates.find(item => item.id === historyId);
+    const historyError = error => { $('historyError').textContent = error; $('historyError').hidden = !error; };
+    function renderHistory() {
+        const select = $('historySelect');
+        select.replaceChildren(...editHistoryLibrary.templates.map(item => new Option(item.name, item.id)));
+        if (!editHistoryLibrary.templates.some(item => item.id === historyId)) historyId = editHistoryLibrary.templates[0]?.id || '';
+        select.value = historyId;
+        const template = currentHistory();
+        $('historyName').value = template?.name || '';
+        $('historyName').disabled = !template;
+        $('deleteHistory').disabled = !template;
+        $('applyHistory').disabled = !template || locked();
+        $('historyEntries').replaceChildren();
+        for (const [index, entry] of (template?.entries || []).entries()) {
+            const box = document.createElement('section'); box.className = 'history-entry';
+            const head = document.createElement('div'); head.className = 'history-entry-head';
+            const field = (label, value, type, onInput) => {
+                const wrap = document.createElement('label'); wrap.textContent = label;
+                const input = document.createElement('input'); input.type = type; input.value = value;
+                input.addEventListener('input', onInput); wrap.append(input); return wrap;
+            };
+            head.append(field('Название', entry.title, 'text', event => { entry.title = event.target.value; historyDirty = true; }));
+            for (const [label, divisor, modulus] of [['Дни', 1440, 60], ['Часы', 60, 24], ['Минуты', 1, 60]]) {
+                const value = divisor === 1440 ? Math.floor(entry.offsetMinutes / 1440) : divisor === 60 ? Math.floor(entry.offsetMinutes / 60) % 24 : entry.offsetMinutes % 60;
+                head.append(field(label, value, 'number', event => {
+                    const n = Number(event.target.value);
+                    if (!Number.isInteger(n) || n < 0 || (divisor !== 1440 && n >= modulus)) return;
+                    const days = Math.floor(entry.offsetMinutes / 1440), hours = Math.floor(entry.offsetMinutes / 60) % 24, minutes = entry.offsetMinutes % 60;
+                    entry.offsetMinutes = (divisor === 1440 ? n : days) * 1440 + (divisor === 60 ? n : hours) * 60 + (divisor === 1 ? n : minutes);
+                    historyDirty = true;
+                }));
+            }
+            const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger'; remove.textContent = '×'; remove.title = 'Удалить дневник';
+            remove.addEventListener('click', () => { if (template.entries.length <= 1) return historyError('В шаблоне должен остаться хотя бы один дневник.'); template.entries.splice(index, 1); historyDirty = true; renderHistory(); });
+            head.append(remove); box.append(head);
+            for (const [name, label] of [['diary', 'Дневник'], ['examination', 'План обследования'], ['treatment', 'План лечения']]) {
+                const wrap = document.createElement('label'); wrap.textContent = label;
+                const input = document.createElement('textarea'); input.maxLength = C.TEXT_LIMIT; input.value = entry[name];
+                input.addEventListener('input', () => { entry[name] = input.value; historyDirty = true; });
+                wrap.append(input); box.append(wrap);
+            }
+            $('historyEntries').append(box);
+        }
+    }
+    $('manageHistory').addEventListener('click', () => {
+        editHistoryLibrary = C.clone(historyLibrary); historyId = editHistoryLibrary.templates[0]?.id || ''; historyDirty = false;
+        $('historyFirstDate').value = row().date; $('historyFirstTime').value = row().time;
+        historyError(''); renderHistory(); $('historyDialog').showModal();
+    });
+    $('historySelect').addEventListener('change', () => { historyId = $('historySelect').value; renderHistory(); });
+    $('historyName').addEventListener('input', () => { const template = currentHistory(); if (template) { template.name = $('historyName').value; historyDirty = true; } });
+    $('newHistory').addEventListener('click', () => {
+        if (editHistoryLibrary.templates.length >= 50) return historyError('Не более 50 шаблонов истории.');
+        const template = { id: C.uid(), name: 'Новый шаблон истории', entries: [{ id: C.uid(), title: 'Первый дневник', offsetMinutes: 0, diary: '', examination: '', treatment: '' }] };
+        editHistoryLibrary.templates.push(template); historyId = template.id; historyDirty = true; renderHistory(); $('historyName').focus(); $('historyName').select();
+    });
+    $('deleteHistory').addEventListener('click', () => {
+        if (!currentHistory() || !confirm('Удалить этот шаблон истории? Уже созданные черновики не изменятся.')) return;
+        editHistoryLibrary.templates = editHistoryLibrary.templates.filter(item => item.id !== historyId); historyDirty = true; renderHistory();
+    });
+    $('addHistoryEntry').addEventListener('click', () => {
+        const template = currentHistory(); if (!template) return historyError('Сначала создайте шаблон.');
+        if (template.entries.length >= C.MAX_ROWS) return historyError('Не более 48 дневников в шаблоне.');
+        template.entries.push({ id: C.uid(), title: 'Следующий дневник', offsetMinutes: (template.entries.at(-1)?.offsetMinutes || 0) + 1440, diary: '', examination: '', treatment: '' });
+        historyDirty = true; renderHistory(); $('historyEntries').lastElementChild?.scrollIntoView({ block: 'nearest' });
+    });
+    async function saveHistoryLibrary() {
+        const clean = C.cleanHistoryLibrary(editHistoryLibrary);
+        const result = await request('saveHistoryLibrary', { historyLibrary: clean });
+        historyLibrary = result.historyLibrary; editHistoryLibrary = C.clone(historyLibrary); historyDirty = false;
+        return historyLibrary;
+    }
+    $('saveHistory').addEventListener('click', async () => {
+        try { await saveHistoryLibrary(); historyError(''); renderHistory(); message('Шаблоны истории сохранены.'); }
+        catch (error) { historyError(error.message); }
+    });
+    $('applyHistory').addEventListener('click', async () => {
+        if (locked()) return historyError('Сначала завершите текущую отправку.');
+        if (draft.rows.some(item => item.status === 'saved')) return historyError('В очереди есть сохранённые записи. Очистите её после проверки БАРС, прежде чем создавать новый набор.');
+        try {
+            const template = C.cleanHistoryLibrary(editHistoryLibrary).templates.find(item => item.id === historyId);
+            if (!template) throw new Error('Выберите шаблон истории.');
+            const rows = C.instantiateHistoryTemplate(template, $('historyFirstDate').value, $('historyFirstTime').value);
+            if (draft.rows.length > 1 || draft.rows.some(item => item.diary || item.examination || item.treatment || item.reviewed)) {
+                if (!confirm('Заменить текущие локальные черновики новым набором? Записи БАРС не затрагиваются.')) return;
+            }
+            if (historyDirty) await saveHistoryLibrary();
+            clearTimeout(saveTimer); saveTimer = undefined;
+            await saveChain.catch(() => undefined);
+            const nextDraft = { ...draft, rows, profileId: '' };
+            await request('draft', { draft: C.clone(nextDraft) });
+            draft = nextDraft; selected = rows[0].id; draftRevision = 0; savedDraftRevision = 0; draftSaveError = ''; draftSaveErrorRevision = -1;
+            if (state) state.draft = C.clone(draft);
+            $('historyDialog').close(); resetErrors(); render(); message('Создано ' + rows.length + ' черновика(ов). Заполните показатели, проверьте каждую запись и только потом отправляйте в БАРС.');
+        } catch (error) { historyError(error.message); }
+    });
+    function closeHistory() { if (historyDirty && !confirm('Закрыть без сохранения изменений шаблона?')) return; $('historyDialog').close(); $('manageHistory').focus(); }
+    $('closeHistory').addEventListener('click', closeHistory);
+    $('historyDialog').addEventListener('cancel', event => { event.preventDefault(); closeHistory(); });
     async function poll() {
         if (polling || busy) return;
         polling = true;
@@ -642,7 +745,7 @@
             }
         }
         const loaded = await request('load');
-        library = C.cleanLibrary(loaded.library); state = loaded.state; settings = C.cleanSettings(loaded.settings);
+        library = C.cleanLibrary(loaded.library); historyLibrary = C.upgradeStarterHistoryLibrary(loaded.historyLibrary); state = loaded.state; settings = C.cleanSettings(loaded.settings);
         lastRunVersion = state?.run?.id + ':' + state?.run?.updatedAt + ':' + state?.run?.status;
         acceptRemoteDraft(state?.draft, { resetSelection: true });
         render();

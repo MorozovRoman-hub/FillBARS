@@ -224,10 +224,67 @@
         }) };
     }
     function emptyLibrary() { return { type: 'fillbars-card-templates', version: VERSION, profiles: [] }; }
+    function starterHistoryLibrary() {
+        const entry = (title, offsetMinutes, diary, examination = '', treatment = '') => ({ id: uid(), title, offsetMinutes, diary, examination, treatment });
+        // Clinical wording is from the supplied four-diary sample. Patient identity,
+        // observation dates and measured vitals must never become reusable defaults.
+        const examinationText = 'Состояние пациента удовлетворительное . Жалобы: нет Кожные покровы обычной окраски. тургор кожи обычный. Дыхание в лёгких: везикулярное, хрипов нет. Тоны сердца громкие, ритмичные, ясные. Живот при пальпации: мягкий, безболезненный. Симптомов раздражения брюшины нет. Стул без крови. Мочеиспускание свободное.\nДанных за рецидив кровотечения нет.';
+        return { type: 'fillbars-card-history-templates', version: 1, templates: [{
+            id: uid(), name: 'ЖКК на колоноскопию', entries: [
+                entry('Первичный осмотр', 0, examinationText + ' Готовиться на колоноскопию.', '-колоноскопия'),
+                entry('После колоноскопии', 985, examinationText + ' На колоноскопии хронический внутренний геморрой 2 ст.', '-', 'гемостатическая терапия'),
+                entry('Контрольный осмотр', 2425, examinationText, '-'),
+                entry('Повторный контроль', 3865, examinationText, '-')
+            ]
+        }] };
+    }
+    function upgradeStarterHistoryLibrary(raw) {
+        const library = cleanHistoryLibrary(raw);
+        // Only replace the untouched starter from 5.2.14/5.2.15. A clinician's
+        // edits, including a change to just one field, always take precedence.
+        const legacy = [
+            ['Первичный осмотр', 0, 'Осмотр перед колоноскопией. Жалобы: [уточнить]. Общее состояние и данные осмотра: [уточнить]. Стул и признаки повторного кровотечения: [уточнить].', 'Колоноскопия по показаниям; уточнить подготовку и результаты обследования.', 'Лечение и рекомендации: [уточнить по назначению врача].'],
+            ['После колоноскопии', 985, 'Осмотр после колоноскопии. Жалобы и общее состояние: [уточнить]. Результат колоноскопии: [внести из протокола]. Стул и признаки кровотечения: [уточнить].', 'Оценить результат колоноскопии и динамику состояния.', 'Коррекция лечения: [уточнить].'],
+            ['Контрольный осмотр', 2425, 'Контрольный осмотр. Жалобы, общее состояние, живот, стул и признаки кровотечения: [уточнить по фактическому осмотру].', 'Дальнейшее обследование: [уточнить].', 'Продолжение лечения: [уточнить].'],
+            ['Повторный контроль', 3865, 'Повторный контрольный осмотр. Динамика состояния, жалобы, данные осмотра и стул: [уточнить по фактическому осмотру].', 'Дальнейшее обследование: [уточнить].', 'Рекомендации: [уточнить].']
+        ];
+        const replacement = starterHistoryLibrary().templates[0];
+        for (const template of library.templates) {
+            if (template.name !== replacement.name || template.entries.length !== legacy.length) continue;
+            const untouched = template.entries.every((item, index) => [item.title, item.offsetMinutes, ...textFields.map(field => item[field])].every((value, fieldIndex) => value === legacy[index][fieldIndex]));
+            if (untouched) template.entries = replacement.entries.map((item, index) => ({ ...item, id: template.entries[index].id }));
+        }
+        return library;
+    }
+    function cleanHistoryLibrary(raw) {
+        if (!raw || raw.type !== 'fillbars-card-history-templates' || raw.version !== 1 || !Array.isArray(raw.templates) || raw.templates.length > 50) throw new Error('Неверная библиотека шаблонов истории.');
+        const ids = new Set();
+        return { type: raw.type, version: 1, templates: raw.templates.map(template => {
+            if (!template || typeof template.name !== 'string' || !template.name.trim() || template.name.length > 120 || !Array.isArray(template.entries) || !template.entries.length || template.entries.length > MAX_ROWS) throw new Error('Укажите название и от 1 до 48 дневников шаблона истории.');
+            const id = typeof template.id === 'string' && template.id.length < 100 && !ids.has(template.id) ? template.id : uid(); ids.add(id);
+            const entryIds = new Set();
+            return { id, name: template.name.trim(), entries: template.entries.map((entry, index) => {
+                if (!entry || typeof entry.title !== 'string' || entry.title.length > 120 || !Number.isInteger(entry.offsetMinutes) || entry.offsetMinutes < 0 || entry.offsetMinutes > 60 * 24 * 60 || textFields.some(field => typeof entry[field] !== 'string' || entry[field].length > TEXT_LIMIT)) throw new Error('Проверьте тексты и смещения дневников истории (от 0 до 60 суток).');
+                if (index && entry.offsetMinutes <= template.entries[index - 1].offsetMinutes) throw new Error('Дневники шаблона истории должны идти по возрастанию даты и времени.');
+                const entryId = typeof entry.id === 'string' && entry.id.length < 100 && !entryIds.has(entry.id) ? entry.id : uid(); entryIds.add(entryId);
+                return { id: entryId, title: entry.title.trim(), offsetMinutes: entry.offsetMinutes, diary: entry.diary, examination: entry.examination, treatment: entry.treatment };
+            }) };
+        }) };
+    }
+    function instantiateHistoryTemplate(template, firstDate, firstTime) {
+        if (!validDate(firstDate) || !validTime(firstTime)) throw new Error('Укажите дату и время первого дневника.');
+        const checked = cleanHistoryLibrary({ type: 'fillbars-card-history-templates', version: 1, templates: [template] }).templates[0];
+        const [year, month, day] = firstDate.split('-').map(Number), [hour, minute] = firstTime.split(':').map(Number);
+        const first = new Date(year, month - 1, day, hour, minute);
+        return checked.entries.map(entry => {
+            const stamp = dateParts(new Date(first.getTime() + entry.offsetMinutes * 60000));
+            return { ...createRow({ date: stamp.date, time: stamp.time }), vitals: { temperature: '', pressure: '', pulse: '', respiration: '' }, diary: entry.diary, examination: entry.examination, treatment: entry.treatment, reviewed: false, status: 'draft' };
+        });
+    }
     function fields(row) {
         return { VISIT_DATE: barsDate(row.date), VISIT_TIME: row.time, TEMPERATURE: String(row.vitals?.temperature ?? ''), AD: String(row.vitals?.pressure ?? ''), THSS: String(row.vitals?.pulse ?? ''), THD: String(row.vitals?.respiration ?? ''), S_DNEVNIK: row.diary, STAC_PLAN: row.examination, RECOMEND_CONS: row.treatment };
     }
-    const api = { VERSION, TEXT_LIMIT, MAX_ROWS, DEFAULTS, DEFAULT_SPREAD, textFields, vitalFields, uid, clone, norm, dateParts, validDate, validTime, barsDate, pressure, number, validateVitals, validateRow, validateQueue, inferGender, renderVariant, chooseVariant, createRow, sampleVitals, cleanSettings, cleanLibrary, emptyLibrary, fields };
+    const api = { VERSION, TEXT_LIMIT, MAX_ROWS, DEFAULTS, DEFAULT_SPREAD, textFields, vitalFields, uid, clone, norm, dateParts, validDate, validTime, barsDate, pressure, number, validateVitals, validateRow, validateQueue, inferGender, renderVariant, chooseVariant, createRow, sampleVitals, cleanSettings, cleanLibrary, emptyLibrary, starterHistoryLibrary, upgradeStarterHistoryLibrary, cleanHistoryLibrary, instantiateHistoryTemplate, fields };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.FillBARSCardCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);

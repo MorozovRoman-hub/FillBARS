@@ -94,10 +94,12 @@ function buildFixture(window, options = {}) {
             let scheduled=false;
             form.addEventListener('input',()=>{
                 if(scheduled||editing)return;scheduled=true;
-                window.setTimeout(()=>{
+                // Run after the synchronous fill, before its next verification.
+                // A 4ms timer raced the adapter's 2ms poll on busy Windows hosts.
+                window.queueMicrotask(()=>{
                     if(!form.isConnected)return;
                     for(const semantic of Object.keys(NAMES))form.querySelector('[template_field="'+semantic+'"] '+(['S_DNEVNIK','STAC_PLAN','RECOMEND_CONS'].includes(semantic)?'textarea':'input')).value='Унаследованное значение';
-                },4);
+                });
             });
         }
         return form;

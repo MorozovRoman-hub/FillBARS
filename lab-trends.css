@@ -1,0 +1,10 @@
+.lab-trends { margin-top: 8px; border-top: 1px solid #dce4e9; padding-top: 7px; }
+.lab-trends > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: #267c51; }
+.trend-section { margin-top: 12px; min-width: 0; }
+.trend-section h4 { font-size: 12px; }
+.trend-section svg { display: block; width: 100%; height: auto; margin-top: 4px; }
+.trend-note { font-size: 11px; line-height: 1.4; color: #52606d; margin: 6px 0; }
+.trend-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
+.trend-table th, .trend-table td { padding: 5px 3px; border-bottom: 1px solid #e1e7ec; text-align: left; overflow-wrap: anywhere; }
+.trend-table th:nth-child(1) { width: 36%; }
+.trend-table th:nth-child(2) { width: 24%; }

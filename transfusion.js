@@ -112,7 +112,7 @@
             return '';
         }
 
-        const isoMatch = rawValue.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+        const isoMatch = rawValue.match(/(?:^|\D)(\d{4})-(\d{2})-(\d{2})(?=\D|$)/);
         if (isoMatch) {
             return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
         }
@@ -262,6 +262,8 @@
         setValue('department', patient.department);
         setValue('selectionOrganization', patient.medicalOrganization);
         setValue('transfusionDoctor', patient.doctorName);
+        setValue('recipientAbo', patient.bloodGroupAbo);
+        setValue('recipientRh', patient.bloodGroupRh);
         setValue('requestDate', protocolDate);
         setValue('transfusionDate', protocolDate);
         applyObservationDefaults();

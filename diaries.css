@@ -15,5 +15,7 @@
 @media(max-width:1050px){.header-actions{flex-direction:column;align-items:stretch}.gender-pair{grid-template-columns:repeat(2,minmax(0,1fr))}.pair-actions{grid-column:1/-1}}
 @media(max-width:700px){.header-actions{flex-direction:row}.header-actions button{padding:8px;font-size:11px}.app-header{gap:10px}.gender-choice{flex-wrap:wrap}}
 @media(max-width:480px){.app-header{grid-template-columns:1fr}.header-patient{grid-row:auto;grid-column:auto}.header-actions{grid-row:2}.gender-pair{grid-template-columns:1fr}.pair-actions{grid-column:auto}}
+.history-anchor{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin:12px 0}.history-entry{border:1px solid var(--line);border-radius:9px;padding:12px;margin:10px 0;background:#fafcfc}.history-entry-head{display:grid;grid-template-columns:1fr 110px 80px 80px auto;gap:8px;align-items:end}.history-entry-head label{margin:0}.history-entry-head input{margin-top:3px}.history-entry textarea{min-height:65px;margin:5px 0 10px}.history-entry .plans{margin-top:4px}#historyEntries{max-height:42vh;overflow-y:auto}@media(max-width:700px){.history-entry-head{grid-template-columns:1fr 1fr}.history-entry-head label:first-child{grid-column:1/-1}}
+.history-template-actions{display:grid;gap:6px}.history-template-actions button{width:100%}
 
 .footer-buttons{flex-wrap:wrap}

@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 birthDate: '07.08.1970',
                 historyNumber: '1340014-70784/00765',
                 department: 'ХО2 Амурск',
+                diagnosis: 'Учебный диагноз',
                 doctorName: 'Морозов Р.В.'
             }
         };
@@ -25,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
         assert(document.getElementById('patientBirthDate').value === '1970-08-07', 'дата рождения подставлена');
         assert(document.getElementById('patientHistoryNumber').value === payload.patient.historyNumber, 'номер ИБ подставлен');
         assert(document.getElementById('department').value === payload.patient.department, 'отделение подставлено');
+        assert(document.getElementById('diagnosis').value === payload.patient.diagnosis, 'диагноз из БАРС подставлен');
         assert(document.getElementById('requestDoctor').value === payload.patient.doctorName,
             'врач подставлен в сокращённом виде');
         assert(document.getElementById('patientAge').value === '55', 'возраст подставлен');
@@ -50,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         assert(document.getElementById('department').value === payload.patient.department, 'отделение восстанавливается после очистки');
         assert(document.getElementById('requestDoctor').value === payload.patient.doctorName,
             'врач восстанавливается после очистки');
+        assert(document.getElementById('diagnosis').value === payload.patient.diagnosis, 'диагноз восстанавливается после очистки');
         assert(document.getElementById('patientFullName').value === payload.patient.fullName, 'данные пациента восстановлены');
 
         document.body.dataset.testStatus = 'passed';

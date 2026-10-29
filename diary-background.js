@@ -3,6 +3,7 @@
     const Core = globalThis.FillBARSCardCore;
     const NS = 'fillbars-card-v1';
     const LIBRARY = 'cardLibraryV1';
+    const HISTORY_LIBRARY = 'cardHistoryLibraryV1';
     const SETTINGS = 'cardSettingsV1';
     const ACTIVE = 'cardActiveContextV1';
     const SESSION_FALLBACK_QUOTA_BYTES = 1024 * 1024;
@@ -355,10 +356,10 @@
         if (!Number.isInteger(tabId) || tabId < 0) throw new Error('Не выбрана исходная вкладка БАРС. Откройте дневники кнопкой расширения.');
         if (['draft', 'start', 'continue', 'clear'].includes(message.action)) await assertContext(tabId, message);
         if (message.action === 'load') {
-            const stored = await chrome.storage.local.get([LIBRARY, SETTINGS]);
+            const stored = await chrome.storage.local.get([LIBRARY, HISTORY_LIBRARY, SETTINGS]);
             const active = await activeContext();
             const state = await recover(tabId);
-            return { state: active && active.tabId !== tabId && !protectedRun(state) ? null : state, library: stored[LIBRARY] ? Core.cleanLibrary(stored[LIBRARY]) : Core.emptyLibrary(), settings: stored[SETTINGS] || {} };
+            return { state: active && active.tabId !== tabId && !protectedRun(state) ? null : state, library: stored[LIBRARY] ? Core.cleanLibrary(stored[LIBRARY]) : Core.emptyLibrary(), historyLibrary: stored[HISTORY_LIBRARY] ? Core.upgradeStarterHistoryLibrary(stored[HISTORY_LIBRARY]) : Core.starterHistoryLibrary(), settings: stored[SETTINGS] || {} };
         }
         if (message.action === 'connect') return { state: await connect(tabId) };
         if (message.action === 'saveSettings') {
@@ -370,6 +371,11 @@
             const library = Core.cleanLibrary(message.library);
             await setStorage(chrome.storage.local, { [LIBRARY]: library }, { fallbackQuota: LOCAL_FALLBACK_QUOTA_BYTES, kind: 'local' });
             return { library };
+        }
+        if (message.action === 'saveHistoryLibrary') {
+            const historyLibrary = Core.cleanHistoryLibrary(message.historyLibrary);
+            await setStorage(chrome.storage.local, { [HISTORY_LIBRARY]: historyLibrary }, { fallbackQuota: LOCAL_FALLBACK_QUOTA_BYTES, kind: 'local' });
+            return { historyLibrary };
         }
         if (message.action === 'draft') {
             if (running.has(tabId)) throw new Error('Во время отправки черновики недоступны для изменения.');

@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.8';
+const EXTENSION_VERSION = '5.2.28';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -16,6 +16,7 @@ const PROFILE_STORAGE_KEY = 'barsCustomProfilesV4';
 const ACTIVE_PROFILE_NAMES_STORAGE_KEY = 'barsActiveProfileNamesV1';
 const RESEARCH_CATALOG_STORAGE_KEY = 'barsResearchCatalogV3';
 const ASSIGNMENT_SETTINGS_STORAGE_KEY = 'barsAssignmentSettingsV1';
+const DOCTOR_SETTINGS_STORAGE_KEY = 'fillbarsDoctorsV1';
 const CUSTOM_DRUG_CATALOG_STORAGE_KEY = 'barsCustomDrugCatalogV1';
 const DIAGNOSTIC_RUNS_STORAGE_KEY = 'fillbarsDiagnosticRunsV1';
 const DIAGNOSTIC_MESSAGE_NAMESPACE = 'fillbars-diagnostics-v1';
@@ -1204,15 +1205,75 @@ function getSelectedProfileName() {
 }
 
 function getPatientPrintFields(patientData = {}) {
+    const doctorSettings = getDoctorSettings();
+    const selectedDoctor = doctorSettings.doctors.find(item => item.id === doctorSettings.activeDoctorId);
     return {
+        ...Object.fromEntries(['surname', 'firstName', 'patronymic', 'snils', 'policyNumber', 'insurer',
+            'passportType', 'passportSeries', 'passportNumber', 'passportIssuer', 'passportDate',
+            'registeredAddress', 'actualAddress', 'diagnosis', 'finalDiagnosis', 'icdCode', 'patientDataWarning']
+            .map(key => [key, String(patientData[key] || '').trim()])),
         fullName: sanitizePulledFullName(patientData.fullName),
         birthDate: normalizeDateForInput(patientData.birthDate),
+        startDate: normalizeDateForInput(patientData.startDate),
+        endDate: normalizeDateForInput(patientData.endDate),
         historyNumber: sanitizePatientHistoryNumber(patientData.historyNumber || patientData.medicalCardNumber),
         department: sanitizePatientDepartment(patientData.department),
         medicalOrganization: sanitizeMedicalOrganization(patientData.medicalOrganization),
-        doctorName: formatDoctorName(patientData.doctorName),
+        doctorName: formatDoctorName(selectedDoctor?.fullName || patientData.doctorName),
+        doctorFullName: selectedDoctor?.fullName || String(patientData.doctorName || '').trim(),
+        doctorPosition: selectedDoctor?.position || '',
+        doctorPhone: selectedDoctor?.phone || '',
+        doctorEmail: selectedDoctor?.email || '',
+        bloodGroupAbo: normalizeBloodGroupAbo(patientData.bloodGroupAbo),
+        bloodGroupRh: normalizeBloodGroupRh(patientData.bloodGroupRh),
         appointmentDate: document.getElementById('appointmentDate')?.value || new Date().toISOString().slice(0, 10)
     };
+}
+
+function getDoctorSettings() {
+    const raw = readJsonStorage(DOCTOR_SETTINGS_STORAGE_KEY, {});
+    const doctors = Array.isArray(raw.doctors) ? raw.doctors.slice(0, 30).map(item => ({
+        id: String(item?.id || '').slice(0, 100),
+        fullName: String(item?.fullName || '').trim().slice(0, 160),
+        position: String(item?.position || '').trim().slice(0, 160),
+        phone: String(item?.phone || '').trim().slice(0, 80),
+        email: String(item?.email || '').trim().slice(0, 160)
+    })).filter(item => item.id && item.fullName) : [];
+    return { doctors, activeDoctorId: doctors.some(item => item.id === raw.activeDoctorId) ? raw.activeDoctorId : '' };
+}
+
+function renderDoctorSettings() {
+    const settings = getDoctorSettings();
+    const select = document.getElementById('doctorSelect');
+    select.replaceChildren(new Option('Врач из БАРС', ''), ...settings.doctors.map(item => new Option(item.fullName, item.id)));
+    select.value = settings.activeDoctorId;
+    const doctor = settings.doctors.find(item => item.id === select.value);
+    for (const [id, field] of [['doctorFullName', 'fullName'], ['doctorPosition', 'position'], ['doctorPhone', 'phone'], ['doctorEmail', 'email']]) {
+        document.getElementById(id).value = doctor?.[field] || '';
+    }
+    document.getElementById('deleteDoctor').disabled = !doctor;
+}
+
+function saveDoctorFromUi() {
+    const settings = getDoctorSettings();
+    const selectedId = document.getElementById('doctorSelect').value;
+    const fullName = document.getElementById('doctorFullName').value.trim();
+    if (!fullName || !formatDoctorName(fullName)) { setStatus('❌ Укажите фамилию и имя врача', '#f44336'); return; }
+    const doctor = {
+        id: selectedId || generateId('doctor'), fullName,
+        position: document.getElementById('doctorPosition').value.trim(),
+        phone: document.getElementById('doctorPhone').value.trim(),
+        email: document.getElementById('doctorEmail').value.trim()
+    };
+    if (doctor.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(doctor.email)) { setStatus('❌ Проверьте электронный адрес врача', '#f44336'); return; }
+    const index = settings.doctors.findIndex(item => item.id === doctor.id);
+    if (index >= 0) settings.doctors[index] = doctor;
+    else settings.doctors.push(doctor);
+    if (settings.doctors.length > 30) { setStatus('❌ Можно сохранить не более 30 врачей', '#f44336'); return; }
+    settings.activeDoctorId = doctor.id;
+    writeJsonStorage(DOCTOR_SETTINGS_STORAGE_KEY, settings);
+    renderDoctorSettings();
+    setStatus('✅ Врач сохранён и выбран для бланков');
 }
 
 function normalizeDateForInput(value) {
@@ -1221,7 +1282,7 @@ function normalizeDateForInput(value) {
         return '';
     }
 
-    const isoMatch = rawValue.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+    const isoMatch = rawValue.match(/(?:^|\D)(\d{4})-(\d{2})-(\d{2})(?=\D|$)/);
     if (isoMatch) {
         return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
     }
@@ -1297,6 +1358,45 @@ function sanitizeMedicalOrganization(value) {
     return normalized;
 }
 
+function normalizeBloodGroupAbo(value) {
+    const normalized = String(value || '')
+        .toLocaleUpperCase('ru-RU')
+        .replace(/\s+/g, '')
+        .replace(/0/g, 'O');
+
+    if (/AB\(?IV\)?|IV\(?AB\)?/.test(normalized)) {
+        return 'AB(IV)';
+    }
+    if (/B\(?III\)?|III\(?B\)?/.test(normalized)) {
+        return 'B(III)';
+    }
+    if (/A\(?II\)?|II\(?A\)?/.test(normalized)) {
+        return 'A(II)';
+    }
+    if (/O\(?I\)?|I\(?O\)?/.test(normalized)) {
+        return 'O(I)';
+    }
+    return '';
+}
+
+function normalizeBloodGroupRh(value) {
+    const normalized = String(value ?? '').trim().toLocaleLowerCase('ru-RU');
+    if (!normalized) {
+        return '';
+    }
+    if (/^(?:1|\+)$/.test(normalized)
+        || /(?:rh|резус)\s*\(?\+\)?/i.test(normalized)
+        || /положит|positive/.test(normalized)) {
+        return 'Rh(+)';
+    }
+    if (/^(?:0|-)$/.test(normalized)
+        || /(?:rh|резус)\s*\(?-\)?/i.test(normalized)
+        || /отрицат|negative/.test(normalized)) {
+        return 'Rh(-)';
+    }
+    return '';
+}
+
 function formatDoctorName(value) {
     const normalized = String(value || '')
         .replace(/\s*\([^)]*\)\s*$/, '')
@@ -1329,6 +1429,8 @@ function scorePulledPatientData(data = {}) {
     const department = sanitizePatientDepartment(data.department);
     const medicalOrganization = sanitizeMedicalOrganization(data.medicalOrganization);
     const doctorName = formatDoctorName(data.doctorName);
+    const bloodGroupAbo = normalizeBloodGroupAbo(data.bloodGroupAbo);
+    const bloodGroupRh = normalizeBloodGroupRh(data.bloodGroupRh);
     const fullName = String(data.fullName || '').trim();
     const birthDate = normalizeDateForInput(data.birthDate);
     let score = 0;
@@ -1361,13 +1463,24 @@ function scorePulledPatientData(data = {}) {
         score += 3;
     }
 
+    if (bloodGroupAbo) {
+        score += 1;
+    }
+
+    if (bloodGroupRh) {
+        score += 1;
+    }
+
     return score;
 }
 
 function pickBestPatientData(results = []) {
-    const payloads = results
+    const candidates = results
         .map((result) => result?.result || {})
         .filter((data) => data && typeof data === 'object');
+    const best = candidates.slice().sort((a, b) => scorePulledPatientData(b) - scorePulledPatientData(a))[0] || {};
+    // Never assemble identity, blood group or documents from unrelated frames.
+    const payloads = [best];
     const isLikelyFullName = (value) => {
         return !!sanitizePulledFullName(value);
     };
@@ -1385,6 +1498,8 @@ function pickBestPatientData(results = []) {
     const historyNumber = payloads
         .map((data) => sanitizePatientHistoryNumber(data.historyNumber))
         .find(Boolean) || '';
+    const startDate = normalizeDateForInput(best.startDate);
+    const endDate = normalizeDateForInput(best.endDate);
     const department = payloads
         .map((data) => sanitizePatientDepartment(data.department))
         .find(Boolean) || '';
@@ -1394,14 +1509,26 @@ function pickBestPatientData(results = []) {
     const doctorName = payloads
         .map((data) => formatDoctorName(data.doctorName))
         .find(Boolean) || '';
+    const bloodGroupAbo = payloads
+        .map((data) => normalizeBloodGroupAbo(data.bloodGroupAbo))
+        .find(Boolean) || '';
+    const bloodGroupRh = payloads
+        .map((data) => normalizeBloodGroupRh(data.bloodGroupRh))
+        .find(Boolean) || '';
 
-    if (fullName || birthDate || historyNumber || medicalCardNumber || department || medicalOrganization || doctorName) {
+    if (fullName || birthDate || historyNumber || medicalCardNumber || department || medicalOrganization || doctorName
+        || bloodGroupAbo || bloodGroupRh) {
         return {
+            ...best,
+            startDate,
+            endDate,
             medicalCardNumber,
             historyNumber,
             department,
             medicalOrganization,
             doctorName,
+            bloodGroupAbo,
+            bloodGroupRh,
             fullName,
             birthDate
         };
@@ -1410,18 +1537,24 @@ function pickBestPatientData(results = []) {
     return payloads.sort((left, right) => scorePulledPatientData(right) - scorePulledPatientData(left))[0] || {};
 }
 
-function getPatientDataFromActiveBarsPage() {
+function getPatientDataFromActiveBarsPage(options = {}) {
     return new Promise((resolve, reject) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
             if (!tabs || !tabs[0]) {
                 reject(new Error('Активная вкладка не найдена'));
                 return;
             }
 
+            if (options.includeDetails) {
+                try {
+                    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id, allFrames: true }, world: 'MAIN', files: ['patient-details-adapter.js'] });
+                } catch (error) { reject(error); return; }
+            }
             chrome.scripting.executeScript({
                 target: { tabId: tabs[0].id, allFrames: true },
                 world: 'MAIN',
-                func: readPatientDataFromBarsPage
+                func: readPatientDataFromBarsPage,
+                args: [options]
             }, (results) => {
                 if (chrome.runtime.lastError) {
                     reject(new Error(chrome.runtime.lastError.message));
@@ -1475,7 +1608,7 @@ function openBloodRequestPayload(payload) {
 }
 
 async function openBloodRequest() {
-    const button = document.getElementById('openBloodRequest');
+    const button = document.getElementById('medicalTemplate');
     button.disabled = true;
     setStatus('⏳ Получаю данные пациента из истории болезни БАРС...', '#ff9800');
 
@@ -1504,7 +1637,7 @@ async function openBloodRequest() {
 }
 
 async function openTransfusionProtocol() {
-    const button = document.getElementById('openTransfusionProtocol');
+    const button = document.getElementById('medicalTemplate');
     button.disabled = true;
     setStatus('⏳ Получаю данные пациента из истории болезни БАРС...', '#ff9800');
 
@@ -1539,7 +1672,7 @@ async function openPrintSheetForSelectedProfile() {
         return;
     }
 
-    const button = document.getElementById('openPrintSheet');
+    const button = document.getElementById('medicalTemplate');
     button.disabled = true;
     setStatus('⏳ Получаю ФИО, дату рождения и номер истории из БАРС...', '#ff9800');
 
@@ -1687,8 +1820,121 @@ function closeJournalPanel() {
     document.getElementById('journalPanel')?.classList.add('hidden');
 }
 
-function readPatientDataFromBarsPage() {
-    const normalizeSpaces = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+async function readKidneyDataFromActiveBars(){
+    const tabs=await new Promise((resolve,reject)=>chrome.tabs.query({active:true,currentWindow:true},items=>{
+        if(chrome.runtime.lastError)reject(new Error(chrome.runtime.lastError.message));else resolve(items);
+    }));
+    const tab=tabs?.[0];
+    if(!tab?.id)throw new Error('Активная вкладка БАРС не найдена.');
+    const execute=options=>new Promise((resolve,reject)=>chrome.scripting.executeScript(options,items=>{
+        if(chrome.runtime.lastError)reject(new Error(chrome.runtime.lastError.message));else resolve(items||[]);
+    }));
+    await execute({target:{tabId:tab.id,allFrames:true},world:'MAIN',files:['kidney-bars-adapter.js']});
+    const results=await execute({target:{tabId:tab.id,allFrames:true},world:'MAIN',func:()=>globalThis.FillBARSKidneyBars?.read()||{historyFound:false}});
+    const matches=(results||[]).map(item=>item.result).filter(item=>item?.historyFound);
+    if(matches.length!==1)throw new Error(matches.length?'Открыто несколько историй болезни. Оставьте одну активную историю.':'Откройте историю болезни пациента в БАРС.');
+    return matches[0];
+}
+
+function renderKidneyResult(){
+    const kidney=globalThis.FillBARSKidney;
+    const lab=globalThis.FillBARSLabMarkers;
+    if(!kidney||!lab)return;
+    const read=id=>document.getElementById(id).value;
+    const result=kidney.calculate({sex:read('kidneySex'),age:read('kidneyAge'),weight:read('kidneyWeight'),creatinine:read('kidneyCreatinine'),unit:read('kidneyUnit')});
+    const egfr=document.getElementById('egfrResult'),crcl=document.getElementById('crclResult');
+    egfr.className='kidney-result'+(result.category?' '+result.category.tone:'');
+    egfr.querySelector('strong').textContent=result.egfr===null?'—':result.egfr.toFixed(1);
+    egfr.querySelector('small:last-child').textContent=result.category
+        ? `${result.category.code} · ${result.category.description} · мл/мин/1,73 м²`
+        : 'мл/мин/1,73 м²';
+    crcl.querySelector('strong').textContent=result.crcl===null?'—':result.crcl.toFixed(1);
+    crcl.querySelector('small:last-child').textContent=result.crcl===null?'Нужны пол, возраст, масса и креатинин':'мл/мин · не категория ХБП';
+    const hemoglobin=lab.hemoglobinGL(read('kidneyHemoglobin'),'г/л');
+    const hemoglobinResult=document.getElementById('hemoglobinResult');
+    hemoglobinResult.className='lab-result'+(lab.hemoglobinTone(hemoglobin)?' '+lab.hemoglobinTone(hemoglobin):'');
+    hemoglobinResult.querySelector('strong').textContent=Number.isFinite(hemoglobin)?String(Number(hemoglobin.toFixed(1))):'—';
+    const glucose=lab.glucoseMmolL(read('kidneyGlucose'),'ммоль/л');
+    const glucoseResult=document.getElementById('glucoseResult');
+    glucoseResult.className='lab-result'+(lab.glucoseTone(glucose)?' '+lab.glucoseTone(glucose):'');
+    glucoseResult.querySelector('strong').textContent=Number.isFinite(glucose)?String(Number(glucose.toFixed(2))):'—';
+    const brief=document.getElementById('kidneyBrief');
+    if(brief){
+        const complete=result.egfr!==null&&result.crcl!==null&&Number.isFinite(hemoglobin)&&Number.isFinite(glucose);
+        brief.textContent=complete?'Данные готовы':'Проверьте данные';
+        brief.classList.toggle('warning',!complete);
+    }
+}
+
+async function refreshKidneyData(){
+    const button=document.getElementById('refreshKidney'),source=document.getElementById('kidneySource');
+    button.disabled=true;
+    globalThis.FillBARSLabTrends.render(document.getElementById('labTrends'),null);
+    for(const id of ['kidneySex','kidneyAge','kidneyWeight','kidneyCreatinine','kidneyHemoglobin','kidneyGlucose'])document.getElementById(id).value='';
+    document.getElementById('kidneyUnit').value='мкмоль/л';
+    renderKidneyResult();
+    source.textContent='Получаю пол, возраст, массу и последний креатинин из БАРС…';
+    document.getElementById('kidneyBrief').textContent='Загрузка…';
+    try{
+        const data=await readKidneyDataFromActiveBars();
+        if(data.error)throw new Error(data.error);
+        const kidney=globalThis.FillBARSKidney;
+        document.getElementById('kidneySex').value=kidney.normalizeSex(data.sex);
+        const age=kidney.ageAt(data.birthDate);
+        document.getElementById('kidneyAge').value=Number.isFinite(age)?String(age):'';
+        document.getElementById('kidneyWeight').value=data.weight||'';
+        document.getElementById('kidneyCreatinine').value=data.creatinine||'';
+        const unit=String(data.creatinineUnit||'').toLowerCase();
+        document.getElementById('kidneyUnit').value=/^(?:мг|mg)/.test(unit)?'мг/дл':/^(?:ммоль|mmol)/.test(unit)?'ммоль/л':'мкмоль/л';
+        const hemoglobin=globalThis.FillBARSLabMarkers.hemoglobinGL(data.hemoglobin,data.hemoglobinUnit);
+        document.getElementById('kidneyHemoglobin').value=Number.isFinite(hemoglobin)?String(Number(hemoglobin.toFixed(1))):'';
+        const glucose=globalThis.FillBARSLabMarkers.glucoseMmolL(data.glucose,data.glucoseUnit);
+        document.getElementById('kidneyGlucose').value=Number.isFinite(glucose)?String(Number(glucose.toFixed(2))):'';
+        const pieces=[data.creatinine?`Креатинин: лаборатория${data.creatinineDate?' от '+data.creatinineDate:''}`:'Креатинин не найден',data.weight?'Масса: Общие сведения':'Масса не найдена',Number.isFinite(hemoglobin)?`Гемоглобин: лаборатория${data.hemoglobinDate?' от '+data.hemoglobinDate:''}`:'Гемоглобин не найден',Number.isFinite(glucose)?`Глюкоза: лаборатория${data.glucoseDate?' от '+data.glucoseDate:''}`:'Глюкоза не найдена'];
+        source.textContent=pieces.concat(data.warnings||[]).join('. ');
+        globalThis.FillBARSLabTrends.render(document.getElementById('labTrends'),data.labHistory,data.labHistoryRowCount);
+        renderKidneyResult();
+    }catch(error){source.textContent=`Автозагрузка недоступна: ${error.message} Можно ввести проверенные данные вручную.`;document.getElementById('kidneyBrief').textContent='Проверьте данные';}
+    finally{button.disabled=false;}
+}
+
+async function openMedicalTemplate(event) {
+    const select = event.currentTarget, template = select.value;
+    if(template==='printSheet'||template==='bloodRequest'||template==='transfusionProtocol'){
+        select.value='';
+        if(template==='printSheet')await openPrintSheetForSelectedProfile();
+        else if(template==='bloodRequest')await openBloodRequest();
+        else await openTransfusionProtocol();
+        return;
+    }
+    if (!['military', 'commission', 'referral', 'skt', 'oncology', 'tmk', 'operationConsent', 'anesthesiaConsent', 'colonoscopyConsent', 'bronchoscopyConsent', 'gastroscopyConsent', 'thrombolysisConsent', 'operationProtocol', 'workInjury315', 'workInjury316', 'epidemicInvestigation', 'centralCatheter'].includes(template)) return;
+    select.disabled = true;
+    setStatus('⏳ Получаю данные для бланка…', '#ff9800');
+    try {
+        const patient = getPatientPrintFields(await getPatientDataFromActiveBarsPage({ includeDetails: true }));
+        for (const oldKey of Object.keys(localStorage)) {
+            if (!oldKey.startsWith('fillbars-medical-')) continue;
+            try {
+                const age = Date.now() - Date.parse(JSON.parse(localStorage.getItem(oldKey)).generatedAt);
+                if (!Number.isFinite(age) || age > 600000) localStorage.removeItem(oldKey);
+            } catch (_) { localStorage.removeItem(oldKey); }
+        }
+        const key = `fillbars-medical-${generateId('document')}`;
+        localStorage.setItem(key, JSON.stringify({ patient, generatedAt: new Date().toISOString() }));
+        chrome.tabs.create({ url: chrome.runtime.getURL(`medical-forms.html?template=${template}&payload=${encodeURIComponent(key)}`) });
+        setStatus(patient.patientDataWarning || '✅ Бланк открыт. Проверьте данные перед печатью.');
+    } catch (error) {
+        setStatus(`❌ Не удалось открыть бланк: ${error.message}`, '#f44336');
+    } finally { select.disabled = false; select.value = ''; }
+}
+
+async function readPatientDataFromBarsPage(options = {}) {
+    // Background workers are not the user's active patient context.
+    try {
+        if (window.frameElement?.hasAttribute('data-fillbars-background')
+            || window.frameElement?.hasAttribute('data-fillbars-patient-details')) return {};
+    } catch (_) { /* Cross-origin frames cannot expose the parent DOM. */ }
+    const normalizeSpaces = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
     const cleanValue = (value) => normalizeSpaces(value)
         .replace(/^(фио|ф\.и\.о\.|пациент|дата рождения|д\/р|др|№\s*мед(?:ицинской)?\s*карты|номер\s*карты|медкарта|карта)\s*[:№\-]?\s*/i, '')
         .trim();
@@ -1717,10 +1963,23 @@ function readPatientDataFromBarsPage() {
     const historyForms = Array.from(document.querySelectorAll('.hosp_history_new'))
         .filter(isVisible);
     const historyForm = historyForms.at(-1) || null;
+    const getFormPage = (form, sourceName) => {
+        const direct = form?.form?.page || form?.jsParent?.page || form?.DForm?.page;
+        if (direct) return direct;
+        if (typeof form?.form?.getVar === 'function') return form.form;
+        const pages = [...(window.SYS_pages || []), ...(window.SYS_pages_window || [])];
+        return pages.find(page => page?.form?.name === sourceName
+            && page.form.containerForm?.contains(form))?.form || null;
+    };
     const historyPage = historyForm?.form?.page
         || historyForm?.jsParent?.page
         || historyForm?.DForm?.page
-        || null;
+        || getFormPage(historyForm, 'ArmPatientsInDep/hosp_history_new');
+    const getHistoryIdentity = () => {
+        try { return ['AGENT','PERSMEDCARD','HH_ID'].map(name => cleanValue(historyPage?.getVar?.(name))).join('|'); }
+        catch (_) { return ''; }
+    };
+    const originalIdentity = getHistoryIdentity();
     const getHistoryCaption = (name) => {
         if (!historyForm) {
             return '';
@@ -1734,15 +1993,8 @@ function readPatientDataFromBarsPage() {
             // The exact legacy page exists but is still initializing.
         }
 
-        try {
-            if (typeof getCaption === 'function') {
-                return cleanValue(getCaption(name));
-            }
-        } catch (error) {
-            // Fall through to DOM/text compatibility paths below.
-        }
-
-        return '';
+        const control = historyForm.querySelector(`[name="${name}"], [data="caption:${name}"]`);
+        return cleanValue(control?.value || control?.textContent || '');
     };
     const getUserEnvironmentValue = (label) => {
         const normalizedLabel = String(label || '').replace(/\s+/g, ' ').replace(/:$/, '').trim().toLowerCase();
@@ -1783,7 +2035,7 @@ function readPatientDataFromBarsPage() {
         return '';
     };
     const getCurrentMedicalOrganization = () => {
-        const profileOrganization = getUserEnvironmentValue('ЛПУ');
+        const profileOrganization = getUserEnvironmentValue('ЛПУ') || getUserEnvironmentValue('МО');
         if (profileOrganization) {
             return profileOrganization;
         }
@@ -1815,6 +2067,51 @@ function readPatientDataFromBarsPage() {
             .find((element) => cleanValue(element.value || element.innerText || element.textContent || ''));
         const element = visibleElement || document.querySelector(`[data="caption:${caption}"]`);
         return cleanValue(element?.value || element?.innerText || element?.textContent || '');
+    };
+    const dateFromHistoryCaption = (name) => {
+        const value = getHistoryCaption(name);
+        const match = value.match(/(?:^|\D)(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?=\D|$)/)
+            || value.match(/(?:^|\D)(\d{4})-(\d{2})-(\d{2})(?=\D|$)/);
+        if (!match) return '';
+        const iso = match[1].length === 4
+            ? `${match[1]}-${match[2]}-${match[3]}`
+            : `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+        const parsed = new Date(`${iso}T00:00:00Z`);
+        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : '';
+    };
+    const getBarsFormValue = (name) => {
+        const captionValue = getDirectCaptionValue(name);
+        if (captionValue) {
+            return captionValue;
+        }
+
+        const namedControl = Array.from(document.querySelectorAll(`[name="${name}"]`))
+            .filter(isVisible)
+            .find((element) => cleanValue(element.value || element.innerText || element.textContent || ''));
+        const namedValue = cleanValue(namedControl?.value || namedControl?.innerText || namedControl?.textContent || '');
+        if (namedValue) {
+            return namedValue;
+        }
+
+        try {
+            if (typeof getCaption === 'function') {
+                const value = cleanValue(getCaption(name));
+                if (value) {
+                    return value;
+                }
+            }
+        } catch (error) {
+            // The legacy form may still be loading its ActionVar values.
+        }
+
+        try {
+            if (typeof getVar === 'function') {
+                return cleanValue(getVar(name));
+            }
+        } catch (error) {
+            // Exact DOM captions remain the preferred compatibility path.
+        }
+        return '';
     };
     const normalizeCardNumber = (value) => {
         const match = String(value || '').match(/\b\d{6,}\b/);
@@ -2071,14 +2368,215 @@ function readPatientDataFromBarsPage() {
         ].map(extractDepartmentFromHistoryNumber).find(Boolean) || '';
     };
 
+    const findBloodGroup = () => {
+        const fullBloodGroup = getBarsFormValue('FULL_BLOODGR');
+        const bloodGroupAbo = getBarsFormValue('BLOODGROUPE') || fullBloodGroup;
+        const bloodGroupRh = getBarsFormValue('RHESUS')
+            || getBarsFormValue('NRHESUS')
+            || fullBloodGroup;
+        return { bloodGroupAbo, bloodGroupRh };
+    };
+    const readBloodGroupFromPage = (page) => {
+        const getPageVar = (name) => {
+            try {
+                return cleanValue(page?.getVar?.(name));
+            } catch (error) {
+                return '';
+            }
+        };
+        const getPageCaption = (name) => {
+            try {
+                return cleanValue(page?.getCaption?.(name));
+            } catch (error) {
+                return '';
+            }
+        };
+        const fullBloodGroup = getPageCaption('FULL_BLOODGR');
+        return {
+            bloodGroupAbo: getPageVar('BLOODGROUPE') || fullBloodGroup,
+            bloodGroupRh: getPageVar('RHESUS') || getPageVar('NRHESUS') || fullBloodGroup
+        };
+    };
+    const fetchBloodGroupSilently = () => new Promise((resolve) => {
+        if (!historyForm || typeof openWindow !== 'function') {
+            resolve({ bloodGroupAbo: '', bloodGroupRh: '' });
+            return;
+        }
+
+        let childPage = null;
+        let finished = false;
+        let timeoutId = null;
+        const hidePage = (page) => {
+            try {
+                const container = page?.getContainer?.();
+                const mainDom = container?.GetMainDOM?.() || container?.getContainer?.();
+                if (mainDom?.style) {
+                    mainDom.style.visibility = 'hidden';
+                    mainDom.style.opacity = '0';
+                    mainDom.style.pointerEvents = 'none';
+                }
+            } catch (error) {
+                // The window container may not be attached during its oncreate event yet.
+            }
+        };
+        const finish = (bloodGroup = {}) => {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            try {
+                if (childPage && !childPage.destroyed && typeof closeWindow === 'function') {
+                    closeWindow(null, childPage);
+                }
+            } catch (error) {
+                // The temporary BARS page may already have closed itself.
+            }
+            resolve({
+                bloodGroupAbo: cleanValue(bloodGroup.bloodGroupAbo),
+                bloodGroupRh: cleanValue(bloodGroup.bloodGroupRh)
+            });
+        };
+        const requestBloodGroup = (page) => {
+            const activePage = page || childPage;
+            if (finished) {
+                try { if (activePage && typeof closeWindow === 'function') closeWindow(null, activePage); } catch (_) { /* Already closed. */ }
+                return;
+            }
+            hidePage(activePage);
+            try {
+                // patients_information inherits these in OnCreate; override with the exact history
+                // when a patient-card modal, rather than the history, is currently active.
+                if (typeof activePage?.setVar === 'function') {
+                    for (const name of ['PERSMEDCARD', 'HH_ID', 'AGENT']) {
+                        activePage.setVar(name, historyPage?.getVar?.(name));
+                    }
+                }
+                activePage?.executeServerAction?.(
+                    'getBloodgroupe',
+                    () => finish(readBloodGroupFromPage(activePage)),
+                    () => finish(),
+                    null,
+                    true
+                );
+            } catch (error) {
+                finish(readBloodGroupFromPage(activePage));
+            }
+        };
+
+        try {
+            const agentId = cleanValue(historyPage?.getVar?.('AGENT') || historyPage?.getVar?.('AGENT_ID'));
+            console.debug('[FillBARS] patient_blood_group:auto_fetch_start');
+            childPage = openWindow({
+                name: 'ArmPatientsInDep/patients_information',
+                vars: {
+                    AGENT: agentId,
+                    PERSMEDCARD: cleanValue(historyPage?.getVar?.('PERSMEDCARD')),
+                    HH_ID: cleanValue(historyPage?.getVar?.('HH_ID'))
+                },
+                oncreate() {
+                    hidePage(this?.page || childPage);
+                },
+                onshow() {
+                    requestBloodGroup(this?.page || childPage);
+                }
+            }, true, 1, 1);
+            hidePage(childPage);
+            if (!finished) timeoutId = setTimeout(() => finish(), 8000);
+        } catch (error) {
+            finish();
+        }
+    });
+    // Only read an already open information window if its identity matches this history.
+    const informationForms = Array.from(document.querySelectorAll('[cmptype="Form"]'));
+    const matchedInformation = informationForms.find(form => {
+        const page = form.form?.page || form.jsParent?.page || form.DForm?.page;
+        try {
+            return form.querySelector('[name="FULL_BLOODGR"]') && historyPage
+                && cleanValue(page?.getVar?.('PERSMEDCARD'))
+                && cleanValue(page.getVar('PERSMEDCARD')) === cleanValue(historyPage.getVar('PERSMEDCARD'));
+        } catch (_) { return false; }
+    });
+    let bloodGroup = matchedInformation
+        ? readBloodGroupFromPage(matchedInformation.form?.page || matchedInformation.jsParent?.page || matchedInformation.DForm?.page)
+        : { bloodGroupAbo: '', bloodGroupRh: '' };
+    if (!bloodGroup.bloodGroupAbo && !bloodGroup.bloodGroupRh && historyForm) {
+        bloodGroup = await fetchBloodGroupSilently();
+        console.debug('[FillBARS] patient_blood_group:auto_fetch_result', {
+            found: !!(bloodGroup.bloodGroupAbo || bloodGroup.bloodGroupRh)
+        });
+    }
+
+    const readCard = () => {
+        const cards = Array.from(document.querySelectorAll('.persmedcard_edit')).filter(isVisible);
+        const card = cards.at(-1);
+        if (!card) return { patientDataWarning: 'Для паспортных данных и адреса откройте карточку пациента → Документы / Адреса.' };
+        const read = name => {
+            const control = card.querySelector(`[name="${name}"]`);
+            const input = control?.matches('input,select,textarea') ? control : control?.querySelector('input,select,textarea');
+            return cleanValue(input?.value || control?.textContent || '');
+        };
+        const cardPage = getFormPage(card, 'Persmedcard/persmedcard_edit');
+        const getId = page => { try { return cleanValue(page?.getVar?.('AGENT')); } catch (_) { return ''; } };
+        const surname = read('SURNAME'), firstName = read('FIRSTNAME'), patronymic = read('LASTNAME');
+        const fullName = [surname, firstName, patronymic].filter(Boolean).join(' ');
+        const historyName = getHistoryCaption('PAT_FIO');
+        const historyAgent = getId(historyPage), cardAgent = getId(cardPage);
+        const historyBirth = getHistoryCaption('PAT_BDATE').match(/\d{1,2}[./-]\d{1,2}[./-]\d{4}/)?.[0];
+        const cardBirth = read('BIRTHDATE').match(/\d{1,2}[./-]\d{1,2}[./-]\d{4}/)?.[0];
+        if (historyForm && !(historyAgent && cardAgent ? historyAgent === cardAgent
+            : fullName && historyName && historyBirth && historyBirth === cardBirth
+                && fullName.toLocaleLowerCase('ru') === historyName.toLocaleLowerCase('ru'))) {
+            return { patientDataWarning: 'Карточка и история болезни не сопоставлены: паспорт и адрес не перенесены.' };
+        }
+        const equalControl = card.querySelector('[name="ADDR_REAL_EQ_REG"]');
+        const sameAddress = equalControl?.querySelector('input')?.checked === true;
+        const actualAddress = read('REAL_ADDRS_ADR_FULL');
+        return {
+            surname, firstName, patronymic, fullName, birthDate: read('BIRTHDATE'),
+            snils: read('SNILS'), policyNumber: read('ENP') || read('POLIS_OMS_NUM'),
+            insurer: read('POLIS_OMS_WHO'), passportType: read('PERSDOC_TYPE'),
+            passportSeries: read('PERSDOCS_SER'), passportNumber: read('PERSDOC_NUMB'),
+            passportIssuer: read('PERSDOCS_WHO'), passportDate: read('PERSDOC_WHEN'),
+            actualAddress, registeredAddress: sameAddress ? actualAddress : read('REG_ADDRS_ADR_FULL'),
+            patientDataWarning: read('PERSDOC_NUMB') ? '' : 'Паспорт не найден. Проверьте вкладку Документы / Адреса.'
+        };
+    };
+    let cardData = readCard();
+    if (options.includeDetails && historyForm) {
+        if (!window.FillBARSPatientDetails) throw new Error('Не загружен модуль получения реквизитов. Перезагрузите расширение.');
+        cardData = await window.FillBARSPatientDetails.read({
+            window,
+            context: {
+                agentId: cleanValue(historyPage?.getVar?.('AGENT')),
+                medicalCardId: cleanValue(historyPage?.getVar?.('PERSMEDCARD'))
+            },
+            isCurrent: () => historyForm.isConnected && originalIdentity === getHistoryIdentity()
+        });
+    }
+    if (historyForm && (!historyForm.isConnected || originalIdentity !== getHistoryIdentity())) {
+        throw new Error('Пациент изменился во время получения данных. Откройте бланк повторно.');
+    }
     return {
+        ...cardData,
+        diagnosis: getHistoryCaption('MKB_CLINIC_EXACT') || getHistoryCaption('MKB_DEP_EXACT')
+            || getHistoryCaption('MKB_FINAL_EXACT') || getHistoryCaption('MKB_RECEIVE_EXACT')
+            || getHistoryCaption('MKB_SEND_EXACT'),
+        finalDiagnosis: getHistoryCaption('MKB_FINAL_EXACT'),
+        icdCode: getHistoryCaption('MKB_CLINIC') || getHistoryCaption('MKB_DEP'),
+        startDate: dateFromHistoryCaption('HH_DATE_IN'),
+        endDate: dateFromHistoryCaption('HH_DATE_OUT'),
         medicalCardNumber: findMedicalCardNumber(),
         historyNumber: findHistoryNumber(),
         department: findDepartment(),
         medicalOrganization: getCurrentMedicalOrganization(),
         doctorName: getCurrentDoctorName(),
-        fullName: findFullName(),
-        birthDate: findBirthDate()
+        bloodGroupAbo: bloodGroup.bloodGroupAbo,
+        bloodGroupRh: bloodGroup.bloodGroupRh,
+        fullName: (historyForm ? findFullName() : cardData.fullName) || '',
+        birthDate: (historyForm ? findBirthDate() : cardData.birthDate) || ''
     };
 }
 
@@ -2478,6 +2976,7 @@ function saveManualDrugToCatalog() {
 
 function openSettingsPanel() {
     document.getElementById('settingsPanel').classList.remove('hidden');
+    renderDoctorSettings();
     renderTemplateLibraryList();
     renderProfileManagerList();
 }
@@ -3160,6 +3659,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('settingsToggle').addEventListener('click', openSettingsPanel);
     document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);
+    document.getElementById('doctorSelect').addEventListener('change', (event) => {
+        const settings = getDoctorSettings();
+        settings.activeDoctorId = event.target.value;
+        writeJsonStorage(DOCTOR_SETTINGS_STORAGE_KEY, settings);
+        renderDoctorSettings();
+    });
+    document.getElementById('saveDoctor').addEventListener('click', saveDoctorFromUi);
+    document.getElementById('newDoctor').addEventListener('click', () => {
+        document.getElementById('doctorSelect').value = '';
+        for (const id of ['doctorFullName', 'doctorPosition', 'doctorPhone', 'doctorEmail']) document.getElementById(id).value = '';
+        document.getElementById('doctorFullName').focus();
+    });
+    document.getElementById('deleteDoctor').addEventListener('click', () => {
+        const settings = getDoctorSettings();
+        const id = document.getElementById('doctorSelect').value;
+        if (!id || !confirm('Удалить сохранённые данные выбранного врача?')) return;
+        settings.doctors = settings.doctors.filter(item => item.id !== id);
+        settings.activeDoctorId = '';
+        writeJsonStorage(DOCTOR_SETTINGS_STORAGE_KEY, settings);
+        renderDoctorSettings();
+        setStatus('Врач удалён. Для бланков снова используется врач из БАРС.');
+    });
     document.getElementById('addProfile').addEventListener('click', () => openProfileEditor());
     document.getElementById('cancelEdit').addEventListener('click', closeProfileEditor);
     document.getElementById('saveProfile').addEventListener('click', saveProfileFromEditor);
@@ -3179,16 +3700,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('markUrgentCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('journalEnabledCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('journalRetentionDays').addEventListener('change', saveScenarioSettingsFromUi);
-    document.getElementById('openPrintSheet').addEventListener('click', openPrintSheetForSelectedProfile);
-    document.getElementById('openBloodRequest').addEventListener('click', openBloodRequest);
-    document.getElementById('openTransfusionProtocol').addEventListener('click', openTransfusionProtocol);
-    document.getElementById('saveJournalEntry').addEventListener('click', () => {
+    document.getElementById('refreshKidney').addEventListener('click', refreshKidneyData);
+    for(const id of ['kidneySex','kidneyAge','kidneyWeight','kidneyCreatinine','kidneyUnit','kidneyHemoglobin','kidneyGlucose']){
+        document.getElementById(id).addEventListener('input',renderKidneyResult);
+        document.getElementById(id).addEventListener('change',renderKidneyResult);
+    }
+    refreshKidneyData().catch(error=>{document.getElementById('kidneySource').textContent=`Не удалось получить данные: ${error.message}`;});
+    document.getElementById('medicalTemplate').addEventListener('change', openMedicalTemplate);
+    document.getElementById('saveJournalEntry')?.addEventListener('click', () => {
         saveSelectedProfileToJournal().catch((error) => {
             console.error('Не удалось сохранить журнал назначений', error);
             setStatus('❌ Не удалось сохранить журнал', '#f44336');
         });
     });
-    document.getElementById('openJournal').addEventListener('click', () => {
+    document.getElementById('openJournal')?.addEventListener('click', () => {
         renderJournalPanel().catch((error) => {
             console.error('Не удалось открыть журнал назначений', error);
             setStatus('❌ Не удалось открыть журнал', '#f44336');

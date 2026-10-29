@@ -10,7 +10,7 @@
   <header class="app-header">
     <div class="brand"><img src="badger.png" alt="" width="40" height="40"><div><span class="eyebrow">FILLBARS CARD</span><h1>Дневники</h1></div></div>
     <section class="header-patient patient-data" aria-label="Карточка пациента"><strong id="patientName">Определяем пациента…</strong><span id="patientDetails">Читаем открытую карточку БАРС.</span><div class="gender-choice"><label for="textGender">Род текста</label><select id="textGender" aria-describedby="genderHint"><option value="auto">Авто</option><option value="male">Мужской</option><option value="female">Женский</option></select></div><span id="genderHint">Используется при выборе шаблона.</span></section>
-    <div class="header-actions"><button id="manageTemplates" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#library"></use></svg>Шаблоны дневников</button><button id="openSettings" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#settings"></use></svg>Настройки</button></div>
+    <div class="header-actions"><div class="history-template-actions"><button id="manageTemplates" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#library"></use></svg>Шаблоны дневников</button><button id="manageHistory" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#library"></use></svg>Шаблон истории</button></div><button id="openSettings" class="secondary"><svg aria-hidden="true"><use href="diary-icons.svg#settings"></use></svg>Настройки</button></div>
   </header>
   <main>
     <div id="message" class="message" role="status" aria-live="polite" hidden></div>
@@ -117,6 +117,18 @@
       </section>
     </div>
     <div id="templateError" class="errors" role="alert" hidden></div>
+  </dialog>
+  <dialog id="historyDialog" aria-labelledby="historyTitle">
+    <div class="dialog-header"><div><span class="eyebrow">НЕСКОЛЬКО ДНЕВНИКОВ</span><h2 id="historyTitle">Шаблон истории</h2></div><button id="closeHistory" class="icon-button" aria-label="Закрыть шаблон истории">×</button></div>
+    <p class="hint">Задайте дату и время первого дневника. Остальные создаются по сохранённым смещениям. Тексты и показатели нужно проверить; отправка в БАРС не запускается автоматически.</p>
+    <div class="history-anchor"><label>Первый дневник — дата<input id="historyFirstDate" type="date"></label><label>Время<input id="historyFirstTime" type="time"></label></div>
+    <label for="historySelect">Шаблон</label><select id="historySelect"></select>
+    <label for="historyName">Название шаблона</label><input id="historyName" maxlength="120">
+    <div class="variant-toolbar"><button id="newHistory" class="secondary">+ Новый шаблон</button><button id="deleteHistory" class="danger">Удалить шаблон</button></div>
+    <h3>Дневники в шаблоне</h3><div id="historyEntries"></div>
+    <button id="addHistoryEntry" class="secondary">+ Дневник</button>
+    <div id="historyError" class="errors" role="alert" hidden></div>
+    <div class="template-footer"><button id="saveHistory" class="secondary">Сохранить шаблоны</button><button id="applyHistory" class="primary">Создать черновики</button></div>
   </dialog>
   <script src="diary-core.js"></script>
   <script src="diaries.js"></script>

@@ -25,7 +25,7 @@
         if (!rawValue) {
             return '';
         }
-        const isoMatch = rawValue.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+        const isoMatch = rawValue.match(/(?:^|\D)(\d{4})-(\d{2})-(\d{2})(?=\D|$)/);
         if (isoMatch) {
             return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
         }
@@ -117,7 +117,10 @@
         setValue('patientBirthDate', birthDate);
         setValue('patientHistoryNumber', patient.historyNumber);
         setValue('department', patient.department);
+        setValue('diagnosis', patient.diagnosis);
         setValue('requestDoctor', patient.doctorName);
+        setValue('recipientAbo', patient.bloodGroupAbo);
+        setValue('recipientRh', patient.bloodGroupRh);
         setValue('patientAge', calculateAge(birthDate, requestDate));
         setValue('requestDate', requestDate);
         syncPrintSelectValue('indication', 'indicationPrintValue');
