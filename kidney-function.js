@@ -50,7 +50,24 @@
         }
         return {egfr,crcl,category:category(egfr),errors,weightMissing:crcl===null,creatinineMgDl:scr};
     }
-    const api={ageAt,normalizeSex,creatinineMgDl,category,calculate};
+    function bodyMassIndex({weight,height,age}){
+        const w=number(weight),h=number(height),a=number(age);
+        if(!Number.isFinite(w)||w<2||w>400||!Number.isFinite(h)||h<50||h>250)
+            return {value:null,category:null,message:'Нужны масса и рост'};
+        const value=w/Math.pow(h/100,2);
+        if(!Number.isInteger(a)||a<18||a>120)
+            return {value,category:null,message:Number.isFinite(a)&&a<18?'Шкала с 18 лет':'Укажите возраст'};
+        const category=value<16?{label:'Дефицит массы III степени',tone:'bmi-underweight-3'}
+            :value<17?{label:'Дефицит массы II степени',tone:'bmi-underweight-2'}
+            :value<18.5?{label:'Дефицит массы I степени',tone:'bmi-underweight-1'}
+            :value<25?{label:'Норма',tone:'bmi-normal'}
+            :value<30?{label:'Избыток массы',tone:'bmi-overweight'}
+            :value<35?{label:'Ожирение I степени',tone:'bmi-obesity-1'}
+            :value<40?{label:'Ожирение II степени',tone:'bmi-obesity-2'}
+            :{label:'Ожирение III степени',tone:'bmi-obesity-3'};
+        return {value,category,message:''};
+    }
+    const api={ageAt,normalizeSex,creatinineMgDl,category,calculate,bodyMassIndex};
     scope.FillBARSKidney=api;
     if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

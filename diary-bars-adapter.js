@@ -1,6 +1,6 @@
 (function (global) {
     'use strict';
-    const VERSION = '1.0.4';
+    const VERSION = '1.2.0';
     if (global.FillBARSCardAdapter?.version === VERSION) return;
     const FIELD_NAMES = ['VISIT_DATE', 'VISIT_TIME', 'TEMPERATURE', 'AD', 'THSS', 'THD', 'S_DNEVNIK', 'STAC_PLAN', 'RECOMEND_CONS'];
     const EDITOR = '[cmptype="Form"][formname="UniversalTemplate/UniversalTemplate"]';
@@ -95,12 +95,12 @@
         function editor(optional = false) {
             return unique(all(document, EDITOR).filter(visible), 'editor_count', 'Нужно одно окно дневника. Закройте лишние окна приёмов.', optional);
         }
-        function fieldMap(form) {
+        function fieldMap(form, reading = false) {
             const entries = FIELD_NAMES.map(name => {
                 const control = unique(all(form, '[template_field="' + name + '"]'), 'field_structure', 'Структура дневника изменилась: не найдено единственное поле ' + name + '.');
                 const selector = ['S_DNEVNIK', 'STAC_PLAN', 'RECOMEND_CONS'].includes(name) ? 'textarea' : 'input:not([type="hidden"])';
                 const input = unique(control.matches(selector) ? [control] : all(control, selector), 'field_structure', 'Неоднозначное поле ' + name + '.');
-                if (input.disabled || input.readOnly) fail('readonly', 'Поле ' + name + ' недоступно для изменения.');
+                if (!reading && (input.disabled || input.readOnly)) fail('readonly', 'Поле ' + name + ' недоступно для изменения.');
                 return [name, { control, input }];
             });
             return Object.fromEntries(entries);
@@ -142,15 +142,15 @@
                 fields: FIELD_NAMES.filter(name => form.querySelector('[template_field="' + name + '"]')).length
             } };
         }
-        function assertEditor(form, context, mustBeNew) {
+        function assertEditor(form, context, mustBeNew, reading = false) {
             const facts = editorFacts(form, context);
             if (mustBeNew && /Редактирование\s+при[её]ма/i.test(facts.heading)) fail('existing_editor', 'Открыт редактор существующего приёма. Для заполнения нужен новый дневник.');
             if (!facts.summary.serviceReady || !facts.summary.headingReady || !facts.summary.caseReady) fail('editor_loading', 'БАРС ещё не загрузил услугу, пациента или историю болезни.');
             if (!facts.summary.serviceMatches) fail('wrong_service', 'В открытом приёме указана другая услуга. Автоматически заполняется только «Дневник врача».');
             if (!facts.summary.nameMatches || !facts.summary.historyMatches) fail('editor_patient', !facts.summary.nameMatches ? 'ФИО в заголовке приёма не совпадает с карточкой. Поля не сохранены.' : 'История болезни в выбранном случае приёма не совпадает с карточкой. Поля не сохранены.');
-            return fieldMap(form);
+            return fieldMap(form, reading);
         }
-        async function readyEditor(context, mustBeNew, expectedForm = null) {
+        async function readyEditor(context, mustBeNew, expectedForm = null, reading = false) {
             record('Ожидание загрузки приёма');
             const end = Date.now() + timeout;
             let signature = '', stableSince = 0, lastError = null, lastFacts = {};
@@ -160,8 +160,10 @@
                 if (expectedForm && form !== expectedForm) fail('editor_changed', 'Окно приёма изменилось во время подготовки.');
                 if (form) {
                     try {
-                        const map = assertEditor(form, context, mustBeNew);
+                        const map = assertEditor(form, context, mustBeNew, reading);
                         if (form.getAttribute('aria-busy') === 'true') fail('editor_loading', 'Форма БАРС ещё загружается.');
+                        const runtime = pageFor(form);
+                        if (reading && (runtime?.form?.requestsCount > 0 || runtime?.requestsCount > 0)) fail('editor_loading', 'Сохранённый приём ещё загружает данные.');
                         lastError = null;
                         lastFacts = editorFacts(form, context).summary;
                         const current = JSON.stringify([editorHeading(form), ...Object.values(map).map(item => item.input.value)]);
@@ -246,8 +248,8 @@
             form = await wait(() => editor(true), 'Окно добавления дневника не открылось. Откройте его вручную.');
             return readyEditor(context, true, form);
         }
-        function readFields(form) {
-            return Object.fromEntries(Object.entries(fieldMap(form)).map(([name, entry]) => [name, entry.input.value.replace(/\r\n/g, '\n')]));
+        function readFields(form, reading = false) {
+            return Object.fromEntries(Object.entries(fieldMap(form, reading)).map(([name, entry]) => [name, entry.input.value.replace(/\r\n/g, '\n')]));
         }
         function sameFields(actual, expected) {
             return FIELD_NAMES.every(name => actual[name] === String(expected[name]).replace(/\r\n/g, '\n'));
@@ -295,6 +297,51 @@
         let prepared = null;
         let busy = false;
         let activeRun = null;
+        async function rereadSaved(saved, item) {
+            let form = null;
+            checkContext(item.context);
+            if (editor(true)) fail('readback_editor', 'Перед повторным чтением уже открыт другой приём.');
+            const grid = listGrid(), page = pageFor(grid);
+            const entry = unique(rows(grid).filter(row => row.id === saved.id), 'readback_row', 'Сохранённая строка больше недоступна.');
+            // Native edit opens VIS_ID, not the direction ID used by the grid.
+            const data = page?.getDataSet?.('DS_DIRECTION_OBSERVATIONS', false)?.data;
+            const persisted = Array.isArray(data) ? data.filter(row => String(row.ID) === saved.id) : [];
+            if (persisted.length !== 1 || !persisted[0].VIS_ID) fail('readback_identity', 'Не получен идентификатор сохранённого приёма.');
+            const visitId = String(persisted[0].VIS_ID);
+            entry.el.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+            entry.el.click();
+            if (String(page?.getValue?.('GRID_DIRECTION_OBSERVATIONS')) !== saved.id) fail('readback_selection', 'БАРС не подтвердил выбор сохранённого осмотра.');
+            entry.el.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, button: 2 }));
+            const edit = await wait(() => {
+                checkContext(item.context);
+                const matches = all(document, '[name="pEDIT"][cmptype="PopupItem"]').filter(visible);
+                if (matches.length > 1) fail('readback_action', 'Несколько меню редактирования сохранённого осмотра.');
+                const action = matches[0];
+                return action && !action.disabled && action.getAttribute('enabled') !== 'false' && action.getAttribute('aria-disabled') !== 'true' && !/ctrl_disable|disabled/.test(action.className) ? action : null;
+            }, 'Штатное редактирование сохранённого осмотра недоступно.');
+            checkContext(item.context);
+            if (String(page.getValue('GRID_DIRECTION_OBSERVATIONS')) !== saved.id) fail('readback_selection', 'Выбранный осмотр изменился до повторного чтения.');
+            inPage(page, () => edit.click());
+            try {
+                form = await wait(() => { checkContext(item.context); return editor(true); }, 'Сохранённый приём не открылся для чтения.');
+                await readyEditor(item.context, false, form, true);
+                const openedPage = pageFor(form);
+                if (!/Редактирование\s+при[её]ма/i.test(editorHeading(form)) || String(openedPage?.getVar?.('VISIT') || openedPage?.getVar?.('VIS_ID')) !== visitId) fail('readback_identity', 'Повторно открыт другой приём.');
+                checkContext(item.context);
+                const actual = readFields(form, true);
+                record('Сохранённый дневник повторно прочитан', { verification: 'readback', fieldCount: FIELD_NAMES.length });
+                return FIELD_NAMES.filter(name => actual[name] !== String(item.values[name]).replace(/\r\n/g, '\n')).map(field => {
+                    const limit = ['S_DNEVNIK', 'STAC_PLAN', 'RECOMEND_CONS'].includes(field) ? 4000 : 128;
+                    return { field, actual: actual[field].slice(0, limit), truncated: actual[field].length > limit };
+                });
+            } finally {
+                if (form?.isConnected && editor(true) === form) {
+                    const cancel = unique(all(form, '[name="Btn_Cancel"][cmptype="Button"]').filter(visible), 'readback_close', 'Не удалось закрыть повторно открытый приём без сохранения.');
+                    inPage(pageFor(form), () => cancel.click());
+                    await wait(() => !form.isConnected || !visible(form), 'Повторно открытый приём не закрылся.');
+                }
+            }
+        }
         async function probe() {
             const context = patientContext();
             const form = editor(true);
@@ -312,7 +359,7 @@
             assertEditor(form, context, true);
             await replaceFields(form, request.context, request.values);
             activeRun = request.runId;
-            prepared = { runId: request.runId, rowId: request.row.id, form, before, values: { ...request.values }, context: request.context, row: request.row, attempted: false };
+            prepared = { runId: request.runId, rowId: request.row.id, form, before, directionId: String(pageFor(form)?.getVar?.('DIR_SERVICE') || ''), values: { ...request.values }, context: request.context, row: request.row, attempted: false };
             return { prepared: true, fieldCount: FIELD_NAMES.length };
         }
         async function save(request) {
@@ -340,18 +387,32 @@
                     const grid = listGrid(true);
                     const visibleRows = grid ? rows(grid) : [];
                     const newRows = visibleRows.filter(entry => !item.before.includes(entry.id));
-                    const candidates = newRows.filter(entry => matchesRow(entry, item.row));
+                    const candidates = newRows.filter(entry => item.directionId ? entry.id === item.directionId && entry.text.includes('Дневник врача') : matchesRow(entry, item.row));
                     observed = { listReady: !!grid, rows: visibleRows.length, newRows: newRows.length, matchingRows: candidates.length };
                     if (candidates.length > 1) fail('multiple_results', 'После сохранения появилось несколько подходящих строк.');
                     return candidates[0];
                 }, 'Новая строка дневника не появилась в списке.');
                 checkContext(item.context);
-                // The list confirms creation, not a reread of persisted contents.
-                // All nine fields were checked immediately before the save click.
+                record('Новый дневник найден в списке осмотров', { ...observed, verification: 'list' });
+                if (request.verifyAfterSave === false) {
+                    prepared = null; activeRun = null;
+                    return { saved: true, verified: true, verification: 'list', recordId: saved.id };
+                }
+                let verification;
+                try {
+                    const differences = await rereadSaved(saved, item);
+                    checkContext(item.context);
+                    verification = differences.length
+                        ? { verified: false, verification: 'mismatch', code: 'saved_mismatch', differences, message: 'Дневник сохранён, но повторное чтение выявило расхождения. Проверьте указанные поля в БАРС; повторная отправка не выполнялась.' }
+                        : { verified: true, verification: 'readback' };
+                    record(differences.length ? 'Обнаружены расхождения сохранённых полей' : 'Все сохранённые поля совпадают', { changedFields: differences.map(item => item.field), verification: verification.verification });
+                } catch (error) {
+                    record('Повторное чтение недоступно', { cause: error.code || 'adapter_error' });
+                    verification = { verified: false, verification: 'unavailable', code: 'readback_unavailable', message: 'Дневник найден в списке, но его содержимое повторно прочитать не удалось. Проверьте сохранённую запись в БАРС; повторная отправка не выполнялась.' };
+                }
                 prepared = null;
                 activeRun = null;
-                record('Новый дневник найден в списке осмотров', { ...observed, verification: 'list' });
-                return { saved: true, verified: true, verification: 'list', recordId: saved.id };
+                return { saved: true, ...verification, recordId: saved.id };
             } catch (error) {
                 record('Подтверждение сохранения не получено', { at: stage, cause: error.code || 'adapter_error', ...observed });
                 fail('save_uncertain', 'Сохранение отправлено, но появление дневника в списке не подтверждено. Проверьте текущую запись в БАРС. Если она сохранена, нажмите «Запись сохранена — продолжить». ' + (error.code === 'patient_changed' ? 'Изменилась карточка пациента.' : ''));
@@ -383,5 +444,8 @@
     const api = { version: VERSION, create, FIELD_NAMES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     global.FillBARSCardAdapter = api;
-    if (global.document && !global.frameElement?.hasAttribute('data-fillbars-background')) global.__FillBARSCardPage = create();
+    if (global.document && !global.frameElement?.hasAttribute('data-fillbars-background')) {
+        global.__FillBARSCardForegroundPage = create();
+        global.__FillBARSCardPage = global.__FillBARSCardForegroundPage;
+    }
 })(typeof window !== 'undefined' ? window : globalThis);

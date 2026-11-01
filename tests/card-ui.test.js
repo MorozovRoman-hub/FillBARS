@@ -3,7 +3,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {JSDOM}=require('jsdom');
 const C=require('../diary-core');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function setup({state,library,historyLibrary,settings={},failConnect=false,otherState,statusGate,continueResult,draftResult,random}={}){
+async function setup({state,library,historyLibrary,settings={},failConnect=false,otherState,statusGate,continueResult,draftResult,historySaveResult,random}={}){
     const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../diaries.html'),'utf8'),{url:'https://extension.invalid/diaries.html?tab=1',runScripts:'outside-only'});
     const win=dom.window;
     if(random)win.Math.random=random;
@@ -30,7 +30,7 @@ async function setup({state,library,historyLibrary,settings={},failConnect=false
         if(message.action==='status'){const snapshot=JSON.parse(JSON.stringify(current));if(statusGate)await statusGate;return {ok:true,state:snapshot};}
         if(message.action==='continue'&&continueResult){const result=await continueResult(message,current);if(result.state)current=result.state;return result;}
         if(message.action==='saveLibrary'){lib=C.cleanLibrary(message.library);return {ok:true,library:lib};}
-        if(message.action==='saveHistoryLibrary'){historyLib=C.cleanHistoryLibrary(message.historyLibrary);return {ok:true,historyLibrary:historyLib};}
+        if(message.action==='saveHistoryLibrary'){const response=historySaveResult?await historySaveResult(message):null;if(response&&!response.ok)return response;historyLib=C.cleanHistoryLibrary(message.historyLibrary);return {ok:true,historyLibrary:historyLib};}
         if(message.action==='saveSettings'){settings=C.cleanSettings(message.settings);return {ok:true,settings};}
         return {ok:true,state:current};
     }}};
@@ -56,6 +56,128 @@ test('starter history creates four unreviewed drafts at relative dates without s
         assert(!app.calls.some(call=>call.action==='start'));
     }finally{app.dom.window.close();}
 });
+test('renal history side updates all template entries and prepared drafts without sending',async()=>{
+    const app=await setup();
+    try{
+        app.$('manageHistory').click();
+        app.$('historySelect').value='renal-colic-history-v1';app.$('historySelect').dispatchEvent(new app.win.Event('change'));
+        assert.equal(app.$('historySideChoice').hidden,false);
+        app.$('historySide').value='right';app.$('historySide').dispatchEvent(new app.win.Event('change'));
+        assert(app.$('historyEntries').querySelector('textarea').value.includes('правой почки'));
+        app.$('applyHistory').click();await pause(50);
+        assert.equal(app.state.draft.rows.length,6);
+        assert.equal(app.state.draft.historySide,'right');
+        assert(app.state.draft.rows[0].diary.includes('Почечная колика справа'));
+        app.input('diary',app.$('diary').value+' Индивидуальная правка.');
+        app.$('reviewed').click();
+        app.$('draftSide').value='left';app.$('draftSide').dispatchEvent(new app.win.Event('change'));
+        await pause(420);
+        assert(app.state.draft.rows[0].diary.includes('левой почки'));
+        assert(app.state.draft.rows[0].diary.includes('Индивидуальная правка.'));
+        assert(app.state.draft.rows.every(item=>!item.reviewed));
+        assert(app.state.draft.rows.slice(2).every(item=>item.diary.includes('с двух сторон')));
+        assert(!app.calls.some(call=>call.action==='start'));
+    }finally{app.dom.window.close();}
+});
+
+test('saved history entries block bulk side changes',async()=>{
+    const template=C.renalColicHistoryTemplate(),rows=C.instantiateHistoryTemplate(template,'2026-10-29','09:00');
+    rows[0].status='saved';
+    const app=await setup({state:{patient:{key:'test',fullName:'Учебный пациент'},draft:{rows,defaults:{...C.DEFAULTS},profileId:'',hourStep:4,historySide:'left'},run:null}});
+    try{
+        assert.equal(app.$('draftSide').disabled,true);
+        const savesBefore=app.calls.filter(call=>call.action==='draft').length;
+        app.$('draftSide').value='right';app.$('draftSide').dispatchEvent(new app.win.Event('change'));
+        assert(app.$('diary').value.includes('левой почки'));
+        assert.equal(app.calls.filter(call=>call.action==='draft').length,savesBefore);
+    }finally{app.dom.window.close();}
+});
+
+test('edited history is saved, reopens on the same template and is reused in a new editor session',async()=>{
+    const app=await setup();let saved;
+    try{
+        app.$('manageHistory').click();
+        app.$('historySelect').value='renal-colic-history-v1';app.$('historySelect').dispatchEvent(new app.win.Event('change'));
+        const fields=app.$('historyEntries').querySelectorAll('textarea');
+        for(const [index,value] of ['Мой изменённый дневник слева.','Мой план обследования.','Мой план лечения.'].entries()){
+            fields[index].value=value;fields[index].dispatchEvent(new app.win.Event('input',{bubbles:true}));
+        }
+        for(const [name,value] of Object.entries({temperature:'37,2',pressure:'130/80',pulse:'92',respiration:'20'})){
+            const field=app.$('historyEntries').querySelector('[data-history-vital="'+name+'"]');
+            field.value=value;field.dispatchEvent(new app.win.Event('input',{bubbles:true}));
+        }
+        app.input('historyName','Почечная колика — мой шаблон');
+        assert.equal(app.$('historySaveStatus').textContent,'Есть несохранённые изменения');
+        assert.equal(app.$('saveHistory').disabled,false);
+        app.$('saveHistory').click();await pause(30);
+        assert.equal(app.$('historySaveStatus').textContent,'Все изменения сохранены');
+        assert.equal(app.$('saveHistory').disabled,true);
+        app.$('closeHistory').click();app.$('manageHistory').click();
+        assert.equal(app.$('historySelect').value,'renal-colic-history-v1');
+        assert.equal(app.$('historyEntries').querySelector('textarea').value,'Мой изменённый дневник слева.');
+        saved=JSON.parse(JSON.stringify(app.historyLibrary));
+    }finally{app.dom.window.close();}
+    const next=await setup({historyLibrary:saved});
+    try{
+        next.$('manageHistory').click();
+        next.$('historySelect').value='renal-colic-history-v1';next.$('historySelect').dispatchEvent(new next.win.Event('change'));
+        assert.equal(next.$('historyName').value,'Почечная колика — мой шаблон');
+        next.$('applyHistory').click();await pause(30);
+        assert.equal(next.state.draft.rows[0].diary,'Мой изменённый дневник слева.');
+        assert.equal(next.state.draft.rows[0].examination,'Мой план обследования.');
+        assert.equal(next.state.draft.rows[0].treatment,'Мой план лечения.');
+        assert.deepEqual(next.state.draft.rows[0].vitals,{temperature:'37,2',pressure:'130/80',pulse:'92',respiration:'20'});
+        assert(Object.values(next.state.draft.rows[1].vitals).every(value=>value===''));
+        assert.equal(next.state.draft.rows[0].reviewed,false);
+        assert(!next.calls.some(call=>call.action==='start'));
+    }finally{next.dom.window.close();}
+});
+
+test('failed history save keeps edits and allows retry without a false saved status',async()=>{
+    let attempts=0;
+    const app=await setup({historySaveResult:()=>++attempts===1?{ok:false,error:'Хранилище недоступно'}:null});
+    try{
+        app.$('manageHistory').click();app.input('historyName','Мой исправленный шаблон');
+        app.$('saveHistory').click();await pause(30);
+        assert.equal(app.$('historySaveStatus').textContent,'Есть несохранённые изменения');
+        assert.equal(app.$('historyName').value,'Мой исправленный шаблон');
+        assert(app.$('historyError').textContent.includes('Хранилище недоступно'));
+        assert.equal(app.$('saveHistory').disabled,false);
+        app.$('saveHistory').click();await pause(30);
+        assert.equal(app.$('historySaveStatus').textContent,'Все изменения сохранены');
+        assert.equal(app.historyLibrary.templates[0].name,'Мой исправленный шаблон');
+    }finally{app.dom.window.close();}
+});
+
+test('copy highlights inherited fields and later phrase edits without interpreting HTML',async()=>{
+    const app=await setup();
+    try{
+        app.input('diary','Боли слева. Живот мягкий.');app.input('pulse','88');app.$('addTime').click();
+        assert.equal(app.$('comparisonPanel').hidden,false);
+        assert(app.$('pulse').classList.contains('field-inherited'));
+        app.input('diary','Боли справа. Живот мягкий. <img src=x onerror=alert(1)>');
+        assert(app.$('diary').classList.contains('field-changed'));
+        assert(app.$('comparisonFields').querySelector('del').textContent.includes('слева'));
+        assert(app.$('comparisonFields').textContent.includes('справа'));
+        assert(app.$('comparisonFields').querySelector('.diff-equal').textContent);
+        assert.equal(app.$('comparisonFields').querySelector('img'),null);
+        await pause(420);
+        assert(app.state.draft.rows[1].comparison.diary.includes('слева'));
+    }finally{app.dom.window.close();}
+});
+test('post-save discrepancies show expected and actual values safely in the editor',async()=>{
+    const row={...C.createRow(),diary:'Отправленный текст',status:'saved'};
+    const state={patient:{key:'test',fullName:'Учебный пациент'},draft:{rows:[row],defaults:C.DEFAULTS,hourStep:4},run:{id:'run',status:'uncertain',phase:'saving',rows:[row],index:0,results:[{rowId:row.id,recordId:'record',verification:'mismatch',differences:[{field:'S_DNEVNIK',actual:'<img src=x>Другой текст',truncated:false}]}],trace:[]}};
+    const app=await setup({state});
+    try{
+        assert.equal(app.$('verificationPanel').hidden,false);
+        assert(app.$('verificationResults').textContent.includes('Отправленный текст'));
+        assert(app.$('verificationResults').textContent.includes('<img src=x>Другой текст'));
+        assert.equal(app.$('verificationResults').querySelector('img'),null);
+        assert(app.$('rowList').textContent.includes('Расхождения'));
+    }finally{app.dom.window.close();}
+});
+
 test('редактирование сбрасывает подтверждение и новые записи наследуют изменённые показатели',async()=>{
     const app=await setup();
     app.input('diary','Учебный текст');app.$('reviewed').click();assert.equal(app.$('reviewed').checked,true);
@@ -399,4 +521,13 @@ test('старый шаблон открывается в редакторе о�
         assert(!app.$('genderPairs').textContent.includes('{{род:'));
         assert(![...app.$('genderPairs').querySelectorAll('button')].some(button=>button.textContent.includes('Вставить')));
     }finally{app.dom.window.close();}
+});
+
+test('readback setting defaults off and survives reopening settings',async()=>{
+ const app=await setup();try{
+  app.$('openSettings').click();assert.equal(app.$('verifyAfterSave').checked,false);
+  app.$('verifyAfterSave').checked=true;app.$('saveSettings').click();await pause(30);
+  assert.equal(app.settings.verifyAfterSave,true);
+  app.$('openSettings').click();assert.equal(app.$('verifyAfterSave').checked,true);
+ }finally{app.dom.window.close();}
 });

@@ -17,3 +17,5 @@ body:not(.source-layout):not(.operation-print) #preview.oncology{padding:15mm}
   body:not(.source-layout):not(.operation-print) #preview{box-sizing:border-box;width:210mm;max-width:210mm;margin:0 auto;padding:15mm}
   body:not(.source-layout):not(.operation-print) #preview.oncology{padding:15mm}
 }
+
+.field-section-title{font-size:15px;margin:22px 0 13px;padding-top:12px;border-top:1px solid #ccd8d0}.field-section-title:first-child{margin-top:0;padding-top:0;border-top:0}

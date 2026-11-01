@@ -2,7 +2,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
-const Hidden = require('../diary-hidden-adapter');
+const HiddenImpl = require('../diary-hidden-adapter');
+const Hidden = {...HiddenImpl, create: options => HiddenImpl.create({runtimeSettleMs:0,...options})};
 test('сбой загрузки второй карточки не создаёт осмотров ни в одном контексте', async () => {
     const s = setup(); let cards = 0, mutations = 0;
     const foreground = { patientContext: () => ({ key: 'patient1', card: s.w.document.getElementById('card') }), execute: async () => ({ ok: true }) };
@@ -58,7 +59,12 @@ function onWorker(window, initialize) {
         const appendInner = body.append.bind(body);
         body.append = element => {
             appendInner(element);
-            if (element.tagName === 'IFRAME') initialize(element);
+            if (element.tagName === 'IFRAME') {
+                initialize(element);
+                const doc=element.contentDocument,root=doc.documentElement||doc.appendChild(doc.createElement('html'));
+                const content=doc.body||root.appendChild(doc.createElement('body'));
+                const container=doc.createElement('div');container.id='_mainContainer';content.append(container);
+            }
         };
     };
 }
@@ -71,8 +77,18 @@ function setup(options = {}) {
     const foreground = { patientContext: () => ({ key, card }), execute: async r => ({ ok: true, action: r.action }) };
     onWorker(w, frame => {
         child = frame.contentWindow;
-        Object.defineProperty(child.document, 'readyState', { get: () => 'complete' });
-        child.openWindow = config => { opened++; assert.equal(config.name, 'ArmPatientsInDep/hosp_history_new'); assert.equal('PATIENT_ID' in config.vars, false); };
+        if(options.http)child.XMLHttpRequest=class extends child.EventTarget{
+            open(){} send(){this.status=200;this.dispatchEvent(new child.Event('loadend'));}
+        };
+        let readyState=options.delayedBootstrap?'interactive':'complete';
+        child.SYS_countRequests=options.delayedBootstrap?1:0;
+        if(options.login)child.SYS_pages_window=[{form:{name:'System/login'}}];
+        Object.defineProperty(child.document, 'readyState', { get: () => readyState });
+        if(options.delayedBootstrap){setTimeout(()=>{readyState='complete';},20);setTimeout(()=>{child.SYS_countRequests=0;},50);}
+        child.openWindow = config => {
+            opened++; assert.equal(readyState,'complete');assert.equal(child.SYS_countRequests,0);assert.equal(config.name, 'ArmPatientsInDep/hosp_history_new'); assert.equal('PATIENT_ID' in config.vars, false);
+            if(options.http){const request=new child.XMLHttpRequest();request.open('POST','http://fixture.invalid/getform.php?private-id=secret');request.send('private-body=secret');}
+        };
     });
     const factory = { create: ({ guard }) => ({
         patientContext: () => ({ key: 'patient1' }),
@@ -82,13 +98,61 @@ function setup(options = {}) {
             if (options.change && request.action === 'prepare') key = 'patient2';
             if (request.action === 'save') guard();
             if (options.failed && request.action === 'save') return { ok: false, message: 'Test failure' };
+            if (options.readback && request.action === 'save') return options.readback;
             return { ok: true, verified: true, recordId: 'test-record' };
         }
     }) };
-    const adapter = Hidden.create({ window: w, foreground, factory, timeout: 20 });
+    const adapter = Hidden.create({ window: w, foreground, factory, timeout: options.timeout || 20, diagnostic: options.diagnostic });
     const args = { runId: 'run', context: { key }, row: { id: 'row' }, values: { S_DNEVNIK: 'fixture text' } };
     return { dom, w, adapter, args, calls, get opened() { return opened; } };
 }
+test('фон сохраняет сведения о расхождениях и блокирует повторное сохранение',async()=>{
+    const receipt={ok:true,saved:true,verified:false,recordId:'saved',verification:'mismatch',differences:[{field:'S_DNEVNIK',actual:'Фактический текст',truncated:false}]};
+    const s=setup({readback:receipt});
+    try{
+        await s.adapter.execute({...s.args,action:'prepare'});
+        const result=await s.adapter.execute({...s.args,action:'save'});
+        assert.equal(result.saved,true);assert.equal(result.verification,'mismatch');assert.deepEqual(result.differences,receipt.differences);
+        assert.equal((await s.adapter.execute({...s.args,action:'save'})).ok,false);
+        assert.equal(s.calls.filter(action=>action==='save').length,1);
+    }finally{s.dom.window.close();}
+});
+
+test('entry URL preserves the BARS deployment directory without patient query parameters',()=>{
+    assert.equal(Hidden.entryUrl('https://mis.example/bars/index.php?page=private#patient'),'https://mis.example/bars/');
+    assert.equal(Hidden.entryUrl('https://mis.example/bars/'),'https://mis.example/bars/');
+    assert.equal(Hidden.entryUrl('https://mis.example/'),'https://mis.example/');
+    assert.throws(()=>Hidden.entryUrl('https://mis.example/','https://other.example/'),/том же сервере/);
+    assert.equal(Hidden.entryDocumentMatches('https://mis.example/bars/index.php','https://mis.example/bars/'),true);
+    assert.equal(Hidden.entryDocumentMatches('https://other.example/bars/','https://mis.example/bars/'),false);
+    assert.equal(Hidden.entryDocumentMatches('https://mis.example/login','https://mis.example/bars/'),false);
+});
+
+test('callable openWindow during bootstrap does not open a card until native requests finish',async()=>{
+    const s=setup({delayedBootstrap:true,timeout:600});
+    try{
+        const result=await s.adapter.execute({...s.args,action:'prepare'});
+        assert.equal(result.ok,true,result.message);assert.equal(s.opened,1);assert.deepEqual(s.calls,[]);
+    }finally{s.dom.window.close();}
+});
+
+test('a login request stops background initialization before any card or observation is created',async()=>{
+    const s=setup({login:true});
+    try{
+        const result=await s.adapter.execute({...s.args,action:'prepare'});
+        assert.equal(result.code,'background_login');assert.equal(s.opened,0);assert.deepEqual(s.calls,[]);
+    }finally{s.dom.window.close();}
+});
+test('form-loading diagnostics include endpoint and status without request identifiers or bodies',async()=>{
+    const trace=[],s=setup({http:true,diagnostic:(stage,details)=>trace.push({stage,...details})});
+    try{
+        assert.equal((await s.adapter.execute({...s.args,action:'prepare'})).ok,true);
+        assert(trace.some(item=>item.stage==='HTTP начало'&&item.endpoint==='getform.php'));
+        assert(trace.some(item=>item.stage==='HTTP завершение'&&item.status===200));
+        assert(!/secret|private-id|private-body|test-id|fixture.invalid/.test(JSON.stringify(trace)));
+    }finally{s.dom.window.close();}
+});
+
 test('фон: подготовка только загружает карточку, создание начинается на save, фрейм удаляется после подтверждения', async () => {
     const s = setup();
     try {

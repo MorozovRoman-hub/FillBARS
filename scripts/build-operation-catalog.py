@@ -39,6 +39,12 @@ def main():
         item = extract(path)
         if not item or item['name'].casefold() in seen: continue
         seen.add(item['name'].casefold());templates.append(item)
+    # Curated additions live outside the generated JS so rebuilding preserves them.
+    additions = json.loads((ROOT / 'scripts' / 'operation-drafts.json').read_text(encoding='utf-8'))
+    for item in additions:
+        assert set(item) == {'name', 'text'} and len(item['text']) > 100, 'Invalid operation draft'
+        if item['name'].casefold() in seen: continue
+        seen.add(item['name'].casefold());templates.append(item)
     assert templates, 'No safe operation texts found'
     output = ROOT / 'operation-catalog.js'
     output.write_text('globalThis.__FillBARSOperationCatalog__ = '+json.dumps(templates,ensure_ascii=False)+';\n',encoding='utf-8')

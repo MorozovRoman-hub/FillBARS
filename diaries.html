@@ -23,16 +23,18 @@
       <button id="discardRun" class="text-button danger-text" hidden>Удалить локальную очередь…</button>
       <details id="runDiagnostics" class="run-diagnostics" hidden><summary>Журнал выполнения</summary><pre id="runLog"></pre><button id="downloadRunLog" class="secondary">Скачать журнал</button></details>
     </section>
+    <section id="verificationPanel" class="verification-panel" aria-label="Проверка сохранённых дневников" hidden><h2>Проверка после сохранения</h2><div id="verificationResults"></div></section>
     <div class="workspace">
       <aside class="schedule">
         <div class="section-heading"><div><span class="eyebrow">РАСПИСАНИЕ</span><h2>Записи <span id="rowCount" class="count">1</span></h2></div><button id="clearDraft" class="icon-button" title="Очистить черновик" aria-label="Очистить черновик"><svg aria-hidden="true"><use href="diary-icons.svg#trash"></use></svg></button></div>
         <label for="profile">Шаблон выбранной записи</label><select id="profile"><option value="">Без шаблона</option></select>
         <p id="profileHint" class="hint">Без шаблона новое время копирует тексты выбранной записи и показатели последней записи.</p>
+        <div id="draftSideChoice" hidden><label for="draftSide">Сторона во всех черновиках</label><select id="draftSide"><option value="left">Слева</option><option value="right">Справа</option></select><p class="hint">Меняет сторону во всех дневниках и планах. Отметки проверки снимаются.</p></div>
         <div id="rowList" class="row-list" aria-label="Подготовленные дневники"></div>
         <button id="addTime" class="primary wide"><svg aria-hidden="true"><use href="diary-icons.svg#plus"></use></svg>Добавить время</button>
         <div class="step-row"><label for="hourStep">Шаг, часов</label><input id="hourStep" type="number" min="1" max="24" value="4"></div>
         <button id="addDay" class="ghost wide">Добавить следующий день</button>
-        <div class="schedule-note"><svg aria-hidden="true"><use href="diary-icons.svg#shield"></use></svg><p>Сначала проверьте каждую запись. Дневники отправляются в порядке списка.</p></div>
+        <div class="schedule-note"><svg aria-hidden="true"><use href="diary-icons.svg#shield"></use></svg><p>Сначала проверьте каждую запись. Дневники добавляются по одному в открытой карточке БАРС. Во время добавления не редактируйте поля и не меняйте пациента.</p></div>
       </aside>
       <section class="editor" aria-labelledby="editorTitle">
         <div class="editor-heading"><div><span class="eyebrow">ПРЕДПРОСМОТР И ПРАВКА</span><h2 id="editorTitle">Запись 1</h2></div><div class="inline-actions"><span id="rowBadge" class="badge">Черновик</span><button id="deleteRow" class="icon-button" title="Удалить запись из черновика" aria-label="Удалить запись из черновика"><svg aria-hidden="true"><use href="diary-icons.svg#trash"></use></svg></button></div></div>
@@ -60,12 +62,13 @@
           </div>
           <label class="review-check"><input id="reviewed" type="checkbox"><span>Дата, измерения и тексты этой записи проверены мной</span></label>
         </fieldset>
+        <details id="comparisonPanel" class="comparison-panel" open hidden><summary id="comparisonTitle">Изменения дневника</summary><p class="hint">Зелёный — унаследовано, жёлтый — добавлено или изменено, зачёркнуто — удалено.</p><div id="comparisonFields"></div></details>
       </section>
     </div>
   </main>
   <footer class="action-bar">
     <div><strong id="readyCount">Проверено 0 из 1</strong><span id="storageNote">Черновик сохраняется при повторном открытии того же пациента и сбрасывается при смене пациента.</span></div>
-    <div class="footer-buttons"><button id="fillOnly" class="secondary">Заполнить в окне без сохранения</button><button id="sendAll" class="primary"><svg aria-hidden="true"><use href="diary-icons.svg#check"></use></svg>Записать в БАРС в фоне</button></div>
+    <div class="footer-buttons"><button id="fillOnly" class="secondary">Заполнить в окне без сохранения</button><button id="sendAll" class="primary"><svg aria-hidden="true"><use href="diary-icons.svg#check"></use></svg>Добавить дневники в БАРС</button></div>
   </footer>
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
     <div class="dialog-header"><div><span class="eyebrow">ДНЕВНИКИ</span><h2 id="settingsTitle">Настройки</h2></div><button id="closeSettings" class="icon-button" aria-label="Закрыть настройки"><svg aria-hidden="true"><use href="diary-icons.svg#close"></use></svg></button></div>
@@ -92,6 +95,8 @@
       <label class="review-check"><input id="autoPickVitals" type="checkbox"><span>Автоматически подбирать показатели для новых записей</span></label>
       <p class="hint">Если выключено, первая запись получает исходные показатели, следующие наследуют последние введённые значения. Кнопка «Подобрать показатели» работает по нажатию.</p>
     </details>
+    <label class="review-check"><input id="verifyAfterSave" type="checkbox"><span>Дополнительно перечитывать и сверять текст после сохранения</span></label>
+    <p class="hint">Дневники добавляются по одному в открытой карточке БАРС. Дождитесь окончания очереди. Без дополнительной сверки сохранение подтверждается появлением записи в списке осмотров. При включённой сверке расхождение или недоступное чтение остановят очередь.</p>
     <div id="settingsError" class="errors" role="alert" hidden></div>
     <div class="settings-footer"><button id="saveSettings" class="primary">Сохранить настройки</button></div>
   </dialog>
@@ -119,16 +124,18 @@
     <div id="templateError" class="errors" role="alert" hidden></div>
   </dialog>
   <dialog id="historyDialog" aria-labelledby="historyTitle">
-    <div class="dialog-header"><div><span class="eyebrow">НЕСКОЛЬКО ДНЕВНИКОВ</span><h2 id="historyTitle">Шаблон истории</h2></div><button id="closeHistory" class="icon-button" aria-label="Закрыть шаблон истории">×</button></div>
-    <p class="hint">Задайте дату и время первого дневника. Остальные создаются по сохранённым смещениям. Тексты и показатели нужно проверить; отправка в БАРС не запускается автоматически.</p>
+    <div class="dialog-header"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2 id="historyTitle">Редактирование шаблонов истории</h2></div><button id="closeHistory" class="icon-button" aria-label="Закрыть шаблон истории">×</button></div>
+    <div class="history-save-bar"><div><strong>Измените шаблон и сохраните</strong><span id="historySaveStatus" role="status" aria-live="polite"></span></div><button id="saveHistory" class="primary">Сохранить изменения</button><div id="historyError" class="errors" role="alert" hidden></div></div>
+    <p class="hint">Выберите шаблон ниже, измените тексты дневников, показатели, планы и интервалы, затем нажмите «Сохранить изменения». Правки сохранятся в этом браузере для следующих историй. Правки в основном окне дневника меняют только текущий черновик.</p>
+    <p class="hint">Чтобы использовать шаблон, задайте дату и время первого дневника и нажмите «Создать черновики».</p>
     <div class="history-anchor"><label>Первый дневник — дата<input id="historyFirstDate" type="date"></label><label>Время<input id="historyFirstTime" type="time"></label></div>
     <label for="historySelect">Шаблон</label><select id="historySelect"></select>
     <label for="historyName">Название шаблона</label><input id="historyName" maxlength="120">
+    <div id="historySideChoice" hidden><label for="historySide">Сторона почечной колики</label><select id="historySide"><option value="left">Слева</option><option value="right">Справа</option></select><p class="hint">Сторона меняется во всех дневниках и планах этого шаблона, включая диагноз. «С двух сторон» сохраняется.</p></div>
     <div class="variant-toolbar"><button id="newHistory" class="secondary">+ Новый шаблон</button><button id="deleteHistory" class="danger">Удалить шаблон</button></div>
-    <h3>Дневники в шаблоне</h3><div id="historyEntries"></div>
+    <h3>Дневники в шаблоне</h3><p class="hint">Для каждого дневника можно задать температуру, АД, ЧСС и ЧД. Показатели сохраняются в шаблоне и переносятся в черновики. Пустые поля остаются пустыми — заполните их по данным осмотра перед отправкой.</p><div id="historyEntries"></div>
     <button id="addHistoryEntry" class="secondary">+ Дневник</button>
-    <div id="historyError" class="errors" role="alert" hidden></div>
-    <div class="template-footer"><button id="saveHistory" class="secondary">Сохранить шаблоны</button><button id="applyHistory" class="primary">Создать черновики</button></div>
+    <div class="template-footer"><button id="applyHistory" class="primary">Создать черновики</button></div>
   </dialog>
   <script src="diary-core.js"></script>
   <script src="diaries.js"></script>

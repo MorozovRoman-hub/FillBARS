@@ -20,10 +20,11 @@ const {chromium}=require('playwright');
         const kidney=await page.locator('.kidney-results').boundingBox();
         const hemoglobin=await page.locator('#hemoglobinResult').boundingBox();
         const glucose=await page.locator('#glucoseResult').boundingBox();
+        const bmi=await page.locator('#bmiResult').boundingBox();
         const egfr=await page.locator('#egfrResult').boundingBox();
         const crcl=await page.locator('#crclResult').boundingBox();
-        if(!kidney||!hemoglobin||!glucose||!egfr||!crcl||Math.abs(kidney.y-hemoglobin.y)>1||Math.abs(kidney.y-glucose.y)>1||kidney.x>=hemoglobin.x||hemoglobin.x>=glucose.x||glucose.x+glucose.width>430||Math.abs(egfr.y-crcl.y)>1||egfr.x>=crcl.x)throw new Error('Both kidney calculations, hemoglobin and glucose must share one row');
-        await page.screenshot({path:path.resolve(__dirname,'artifacts/popup-527.png'),fullPage:true});
+        if(!kidney||!hemoglobin||!bmi||!glucose||!egfr||!crcl||Math.abs(kidney.y-hemoglobin.y)>1||Math.abs(kidney.y-glucose.y)>1||kidney.x>=hemoglobin.x||hemoglobin.x>=bmi.x||bmi.x>=glucose.x||Math.abs(hemoglobin.y-bmi.y)>1||glucose.x+glucose.width>430||Math.abs(egfr.y-crcl.y)>1||egfr.x>=crcl.x)throw new Error('Both kidney calculations, hemoglobin, BMI and glucose must share one row');
+        await page.screenshot({path:path.resolve(__dirname,'artifacts/popup-535.png'),fullPage:true});
         console.log('Kidney popup layout: OK',Math.round(box.width),Math.round(box.height));
     }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

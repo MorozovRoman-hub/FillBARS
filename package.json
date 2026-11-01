@@ -1,6 +1,6 @@
 {
   "name": "fillbars-card",
-  "version": "5.2.28",
+  "version": "5.2.43",
   "private": true,
   "description": "Локальные проверки расширения FillBARS Card; сборка для установки не нужна.",
   "scripts": {

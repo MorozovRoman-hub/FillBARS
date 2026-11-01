@@ -15,6 +15,9 @@
     // the result and its draft row, so it receives a larger independent reserve.
     const TRACE_ENTRY_RESERVE_BYTES = 1536;
     const RECEIPT_RESERVE_BYTES = 4 * 1024;
+    // Reserve also covers receipts from older parallel runs during recovery.
+    // Reserve bounded actual values separately from the technical log.
+    const READBACK_RESERVE_BYTES = 256 * 1024;
     const running = new Map();
     let operations = Promise.resolve();
     const key = tabId => 'cardSessionV1:' + tabId;
@@ -92,7 +95,7 @@
         if (!run) return 0;
         const receiptCount = Math.max(0, (run.rows?.length || 0) - (run.results?.length || 0));
         const traceCount = Math.max(0, MAX_TRACE_ENTRIES - (run.trace?.length || 0));
-        return receiptCount * RECEIPT_RESERVE_BYTES + traceCount * TRACE_ENTRY_RESERVE_BYTES;
+        return receiptCount * RECEIPT_RESERVE_BYTES + traceCount * TRACE_ENTRY_RESERVE_BYTES + READBACK_RESERVE_BYTES;
     }
     function runProjection(state, rows, fillOnly = false) {
         const projected = Core.clone(state);
@@ -121,8 +124,8 @@
             target: binding.documentId ? { tabId: binding.tabId, documentIds: [binding.documentId] } : { tabId: binding.tabId, frameIds: [binding.frameId] },
             world: 'MAIN',
             func: async request => {
-                if (!globalThis.__FillBARSCardPage) return { ok: false, code: 'page_missing', message: 'Страница перезагружена. Подключитесь заново.' };
-                return globalThis.__FillBARSCardPage.execute(request);
+                if (!globalThis.__FillBARSCardForegroundPage) return { ok: false, code: 'page_missing', message: 'Страница перезагружена. Подключитесь заново.' };
+                return globalThis.__FillBARSCardForegroundPage.execute(request);
             },
             args: [{ action, ...args }]
         });
@@ -131,10 +134,10 @@
     }
     async function connect(tabId) {
         if (running.has(tabId)) throw new Error('Сначала остановите текущую очередь.');
-        await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', files: ['diary-bars-adapter.js', 'diary-hidden-adapter.js'] });
+        await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', files: ['diary-bars-adapter.js'] });
         const frames = await chrome.scripting.executeScript({
             target: { tabId, allFrames: true }, world: 'MAIN',
-            func: async () => globalThis.__FillBARSCardPage ? globalThis.__FillBARSCardPage.execute({ action: 'probe' }) : null
+            func: async () => globalThis.__FillBARSCardForegroundPage ? globalThis.__FillBARSCardForegroundPage.execute({ action: 'probe' }) : null
         });
         const candidates = frames.filter(frame => frame.result?.ok && frame.result.patient?.key);
         if (candidates.length !== 1) throw new Error(candidates.length ? 'Карточка найдена в нескольких фреймах. Оставьте открытым один приём.' : (frames.find(f => f.result?.message)?.result.message || 'Откройте карточку пациента в БАРС.'));
@@ -170,11 +173,15 @@
     function recordSaved(state, row, receipt) {
         const run = state.run;
         run.results ||= [];
-        if (!run.results.some(item => item.rowId === row.id)) run.results.push({
+        const receiptData = {
             rowId: row.id,
             recordId: boundedText(receipt?.recordId, 256),
-            verification: boundedText(receipt?.verification || '', 64)
-        });
+            verification: boundedText(receipt?.verification || '', 64),
+            differences: (receipt?.differences || []).filter(item => Object.keys(Core.fields(row)).includes(item.field)).slice(0, 9).map(item => ({ field: item.field, actual: boundedText(item.actual, ['S_DNEVNIK', 'STAC_PLAN', 'RECOMEND_CONS'].includes(item.field) ? 4000 : 128), truncated: !!item.truncated }))
+        };
+        const existing = run.results.find(item => item.rowId === row.id);
+        if (existing) Object.assign(existing, receiptData, { recordId: receiptData.recordId || existing.recordId });
+        else run.results.push(receiptData);
         const draftRow = state.draft?.rows?.find(item => item.id === row.id);
         if (draftRow) Object.assign(draftRow, { status: 'saved', recordId: boundedText(receipt?.recordId, 256) });
     }
@@ -197,7 +204,7 @@
                 run.index = index;
                 if (control.stop) { run.status = 'stopped'; await checkpoint('stopped', 'Очередь остановлена. Неотправленные записи остались в черновиках.'); return; }
                 await checkpoint('preparing', 'Подготовка дневника ' + (index + 1) + ' из ' + run.rows.length);
-                const args = { runId: run.id, context: state.patient, row, values: Core.fields(row), fillOnly };
+                const args = { runId: run.id, context: state.patient, row, values: Core.fields(row), fillOnly, verifyAfterSave: run.verifyAfterSave === true };
                 const prepared = await callPage(state.binding, 'prepare', args);
                 appendTrace(prepared);
                 if (!prepared.ok) {
@@ -207,7 +214,7 @@
                 if (fillOnly || control.stop) {
                     await callPage(state.binding, 'release');
                     run.status = fillOnly ? 'filled' : 'stopped';
-                    await checkpoint('prepared', fillOnly ? 'Поля заполнены. Приём оставлен открытым, сохранение выполните в БАРС.' : 'Очередь остановлена до создания приёма. Черновики сохранены.');
+                    await checkpoint('prepared', fillOnly ? 'Поля заполнены. Приём оставлен открытым, сохранение выполните в БАРС.' : 'Очередь остановлена. Текущий приём оставлен открытым без сохранения; остальные дневники остались в черновике.');
                     return;
                 }
                 // Persist the saving checkpoint before any request can create a record.
@@ -215,12 +222,13 @@
                 await checkpoint('saving', 'Сохранение и проверка дневника ' + (index + 1));
                 const saved = await callPage(state.binding, 'save', args);
                 appendTrace(saved);
+                if (saved.saved && !saved.verified) recordSaved(state, row, saved);
                 if (!saved.ok || !saved.verified) {
                     run.status = saved.code === 'save_uncertain' || saved.ok ? 'uncertain' : 'failed';
                     run.code = saved.code;
                     await checkpoint(run.status === 'uncertain' ? 'saving' : 'prepared', saved.message || 'Результат не подтверждён. Проверьте БАРС.'); return;
                 }
-                recordSaved(state, row, { recordId: saved.recordId, verification: saved.verification || 'list' });
+                recordSaved(state, row, saved);
                 await checkpoint('verified', 'Сохранение подтверждено: ' + run.results.length + ' из ' + run.rows.length);
             }
             run.status = 'done';
@@ -236,45 +244,6 @@
             await checkpoint(run.phase, error instanceof StorageQuotaError ? storageMessage : publicError()).catch(() => undefined);
         } finally { running.delete(tabId); }
     }
-    async function runParallel(tabId, state) {
-        const run = state.run;
-        try {
-            for (let offset = 0; offset < run.rows.length; offset += 3) {
-                const batch = run.rows.slice(offset, offset + 3);
-                run.index = offset; run.batchSize = batch.length;
-                if (running.get(tabId)?.stop) {
-                    run.status = 'stopped'; run.phase = 'stopped'; run.message = 'Очередь остановлена. Остальные дневники остались в черновике.';
-                    await store(tabId, state); return;
-                }
-                run.phase = 'saving';
-                run.message = 'Параллельная отправка записей ' + (offset + 1) + '–' + (offset + batch.length) + ' из ' + run.rows.length;
-                // Persist uncertainty for ALL rows before a worker may create a direction.
-                await store(tabId, state);
-                const result = await callPage(state.binding, 'parallel', { items: batch.map(row => ({ runId: run.id, context: state.patient, row, values: Core.fields(row) })) });
-                run.trace = [...run.trace, ...(result.trace || []).map(entry => compactTrace(entry, offset + entry.row))].slice(-MAX_TRACE_ENTRIES);
-                const receipts = result.results || [];
-                for (const row of batch) {
-                    const receipt = receipts.find(item => item.rowId === row.id);
-                    if (receipt?.ok && receipt.verified) recordSaved(state, row, receipt);
-                }
-                const ids = run.results.map(item => item.recordId);
-                const complete = result.ok && run.results.length === offset + batch.length && ids.every(Boolean) && new Set(ids).size === ids.length;
-                run.status = complete ? 'running' : result.noWrites === true ? 'failed' : 'uncertain';
-                run.phase = complete ? 'verified' : result.noWrites === true ? 'preparing' : 'saving';
-                run.message = complete ? 'Подтверждено дневников: ' + run.results.length + ' из ' + run.rows.length : 'Проверьте записи текущей группы в БАРС. Автоматического повтора нет. Скачайте журнал перед сбросом.';
-                if (result.noWrites === true) run.message = 'Не все карточки группы загрузились. Создание осмотров этой группы не запускалось. Скачайте журнал загрузки.';
-                run.updatedAt = Date.now();
-                await store(tabId, state);
-                if (!complete) return;
-                }
-            run.status = 'done'; run.phase = 'done'; run.message = 'Все дневники подтверждены: ' + run.results.length + '.'; run.updatedAt = Date.now();
-            await store(tabId, state);
-        } catch {
-            run.status = 'uncertain'; run.phase = 'saving'; run.updatedAt = Date.now();
-            run.message = 'Связь или сохранение состояния прервались. Проверьте записи текущей группы в БАРС; не отправляйте их повторно.';
-            await store(tabId, state).catch(() => undefined);
-        } finally { running.delete(tabId); }
-    }
     async function start(tabId, message) {
         const state = await recover(tabId);
         if (!state?.binding) throw new Error('Откройте карточку пациента и нажмите «Дневники» в расширении.');
@@ -284,7 +253,7 @@
         const errors = Core.validateQueue(rows, { forSending: true });
         if (errors.length) throw new Error('Запись ' + (errors[0].index + 1) + ': ' + errors[0].message);
         assertRowIds(rows);
-        const parallel = !message.fillOnly && message.parallel !== false && rows.length > 1;
+        const parallel = false;
         if (new Set(rows.map(row => row.date + '|' + row.time)).size !== rows.length) throw new Error('Укажите разные даты и время для дневников очереди.');
         if (message.fillOnly && rows.length !== 1) throw new Error('Для заполнения без сохранения выберите одну запись.');
         const savedIds = new Set((state.draft?.rows || []).filter(row => row.status === 'saved').map(row => row.id));
@@ -298,11 +267,10 @@
             const released = await callPage(state.binding, 'release');
             if (!released.ok) throw new Error(released.message || 'Сначала проверьте предыдущую запись в БАРС.');
         }
-        state.run = { id: Core.uid(), status: 'running', phase: 'starting', index: 0, rows, parallel, fillOnly: !!message.fillOnly, results: [], trace: [], updatedAt: Date.now(), message: 'Запуск очереди' };
+        state.run = { id: Core.uid(), status: 'running', phase: 'starting', index: 0, rows, parallel, verifyAfterSave: message.verifyAfterSave === true, fillOnly: !!message.fillOnly, results: [], trace: [], updatedAt: Date.now(), message: 'Последовательная запись в открытой карточке БАРС' };
         running.set(tabId, { stop: false });
         try { await store(tabId, state); } catch (error) { running.delete(tabId); throw error; }
-        if (parallel) void runParallel(tabId, state);
-        else void runQueue(tabId, state, !!message.fillOnly);
+        void runQueue(tabId, state, !!message.fillOnly);
         return state;
     }
     async function continueQueue(tabId, message) {

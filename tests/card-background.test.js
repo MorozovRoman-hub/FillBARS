@@ -2,8 +2,35 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const C=require('../diary-core');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+test('history edits persist in local storage and survive library reload',async()=>{
+    const app=setup(),library=C.starterHistoryLibrary();
+    const renal=library.templates.find(item=>item.id==='renal-colic-history-v1');
+    renal.entries[0].diary='Мой повторно используемый текст справа.';
+    renal.entries[0].examination='Мой план обследования.';
+    renal.side='right';
+    const saved=await app.send('saveHistoryLibrary',{historyLibrary:library});
+    assert.equal(saved.ok,true);
+    assert.equal(app.local.cardHistoryLibraryV1.templates.find(item=>item.id===renal.id).entries[0].diary,renal.entries[0].diary);
+    const loaded=await app.send('load');
+    const reloaded=loaded.historyLibrary.templates.find(item=>item.id===renal.id);
+    assert.equal(reloaded.entries[0].diary,renal.entries[0].diary);
+    assert.equal(reloaded.entries[0].examination,renal.entries[0].examination);
+    assert.equal(reloaded.side,'right');
+});
+test('saved mismatches stop the queue, persist differences and cannot be sent again',async()=>{
+    const app=setup({page:{save:{ok:true,saved:true,verified:false,verification:'mismatch',recordId:'saved-1',code:'saved_mismatch',differences:[{field:'STAC_PLAN',actual:'Другой план',truncated:false}]}}});
+    await app.send('connect');const rows=[validRow(),validRow('09:00')];
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:false});
+    const state=await finished(app);
+    assert.equal(state.run.status,'uncertain');assert.equal(state.draft.rows[0].status,'saved');
+    assert.equal(state.run.results[0].verification,'mismatch');
+    assert.equal(state.run.results[0].differences[0].actual,'Другой план');
+    assert.equal(app.calls.filter(action=>action==='save').length,1);
+    assert.equal((await app.send('start',{rows})).ok,false);
+    assert(!JSON.stringify(state.run.trace).includes('Другой план'));
+});
 function setup({session={},page={},gate,sessionQuota=10*1024*1024,localQuota=10*1024*1024}={}){
-    const local={},calls=[],requests=[];let listener;
+    const local={},calls=[],requests=[],injections=[];let listener;
     const storedBytes=(data,keys=null)=>{
         const names=keys===null?Object.keys(data):(Array.isArray(keys)?keys:[keys]);
         return names.filter(key=>data[key]!==undefined).reduce((total,key)=>total+Buffer.byteLength(String(key),'utf8')+Buffer.byteLength(JSON.stringify(data[key]),'utf8'),0);
@@ -22,7 +49,7 @@ function setup({session={},page={},gate,sessionQuota=10*1024*1024,localQuota=10*
     const sessionArea=storage(session,sessionQuota),localArea=storage(local,localQuota);
     const patient={fullName:'Учебный',birth:'01.01.1980',history:'ДЕМО-1',key:'key1'};
     const chrome={storage:{session:sessionArea,local:localArea},runtime:{id:'test',getURL:name=>'chrome-extension://test/'+name,onMessage:{addListener:fn=>{listener=fn;}}},tabs:{onRemoved:{addListener(){}}},scripting:{executeScript:async options=>{
-        if(options.files)return [];
+        if(options.files){injections.push(options.files);return [];}
         const request=options.args?.[0]||{action:'probe'};calls.push(request.action);requests.push(structuredClone(request));
         if(request.action==='prepare'&&gate)await gate;
         const configured=page[request.action];
@@ -32,71 +59,42 @@ function setup({session={},page={},gate,sessionQuota=10*1024*1024,localQuota=10*
     const context=vm.createContext({chrome,FillBARSCardCore:C,Map,Promise,Date,console});
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../diary-background.js'),'utf8'),context);
     const send=(action,data={},sender={id:'test',url:'chrome-extension://test/diaries.html'})=>new Promise(resolve=>listener({namespace:'fillbars-card-v1',tabId:1,contextId:session['cardSessionV1:'+(data.tabId??1)]?.contextId,action,parallel:false,...data},sender,resolve));
-    return {send,session,local,calls,requests,patient,sessionArea,localArea};
+    return {send,session,local,calls,requests,injections,patient,sessionArea,localArea};
 }
 function validRow(time='08:00'){
     const row=C.createRow({date:'2026-09-01',time});row.diary='Учебный дневник';row.reviewed=true;return row;
 }
-test('параллельная группа получает общий saving checkpoint и три независимые квитанции',async()=>{
-    let app;
-    app=setup({page:{parallel:request=>{
-        const run=app.session['cardSessionV1:1'].run;
-        assert.equal(run.phase,'saving');assert.equal(run.parallel,true);
-        assert.equal(request.items.length,3);
-        return {ok:true,results:request.items.map((item,i)=>({rowId:item.row.id,ok:true,verified:true,recordId:'parallel'+i})),trace:[{time:new Date().toISOString(),row:2,stage:'Запуск сохранения'}]};
-    }}});
-    await app.send('connect');const rows=[validRow(),validRow('09:00'),validRow('10:00')];
-    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:true});
-    const state=await finished(app);
-    assert.equal(state.run.status,'done');assert.equal(state.run.results.length,3);
-    assert.equal(state.run.trace[0].row,2);assert.equal(app.calls.filter(c=>c==='parallel').length,1);
-    assert.equal(app.calls.includes('save'),false);
-});
-test('неполный параллельный результат не разрешает продолжение одной строки или повтор группы',async()=>{
-    const app=setup({page:{parallel:r=>({ok:true,results:[{rowId:r.items[0].row.id,ok:true,verified:true,recordId:'only-one'}]})}});
-    await app.send('connect');const rows=[validRow(),validRow('09:00'),validRow('10:00')];
-    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:true});
-    const state=await finished(app);assert.equal(state.run.status,'uncertain');
-    assert.equal(state.run.results.length,1);
-    assert.equal((await app.send('continue',{runId:state.run.id,rowId:rows[0].id,checkedInBars:true})).ok,false);
-    assert.equal((await app.send('start',{rows,parallel:true})).ok,false);
-    assert.equal(app.calls.filter(c=>c==='parallel').length,1);
-});
-test('один дневник отправляется обычным одиночным циклом',async()=>{
-    const app=setup();await app.send('connect');
-    assert.equal((await app.send('start',{rows:[validRow()],parallel:true})).ok,true);
-    assert.equal((await finished(app)).run.status,'done');
-    assert.equal(app.calls.includes('parallel'),false);
-});
-test('обычный запуск пяти дневников отправляет группы 3+2 и сохраняет квитанции перед следующей группой',async()=>{
-    const sizes=[]; let app;
-    app=setup({page:{parallel:r=>{
-        if(sizes.length)assert.equal(app.session['cardSessionV1:1'].run.results.length,3);
-        sizes.push(r.items.length);
-        return {ok:true,results:r.items.map(item=>({rowId:item.row.id,ok:true,verified:true,recordId:item.row.id}))};
+test('five diaries save sequentially in the visible card, ignoring stale parallel flag',async()=>{
+    let app,index=0;
+    app=setup({page:{save:request=>{
+        assert.equal(app.session['cardSessionV1:1'].run.results.length,index);
+        assert.equal(app.session['cardSessionV1:1'].run.phase,'saving');
+        assert.equal(request.verifyAfterSave,false);index++;
+        return {ok:true,saved:true,verified:true,verification:'list',recordId:request.row.id};
     }}});
     await app.send('connect');const rows=['08:00','09:00','10:00','11:00','12:00'].map(validRow);
-    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:undefined});
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:true});
     const state=await finished(app);
-    assert.deepEqual(sizes,[3,2]);assert.equal(state.run.status,'done');assert.equal(state.run.results.length,5);
-    assert(state.draft.rows.every(row=>row.status==='saved'));
+    assert.equal(state.run.status,'done');assert.equal(index,5);assert.equal(state.run.parallel,false);
+    assert(!app.calls.includes('parallel'));assert(state.draft.rows.every(row=>row.status==='saved'));
+    assert.deepEqual(app.injections.map(files=>Array.from(files)),[['diary-bars-adapter.js']]);
+    assert(state.run.results.every(row=>row.verification==='list'));
+    assert.equal((await app.send('start',{rows})).ok,false);
 });
-test('ошибка первой параллельной группы не запускает следующую',async()=>{
-    const app=setup({page:{parallel:()=>({ok:true,results:[]})}});
-    await app.send('connect');const rows=['08:00','09:00','10:00','11:00'].map(validRow);
-    await app.send('start',{rows,parallel:undefined});
-    assert.equal((await finished(app)).run.status,'uncertain');
-    assert.equal(app.calls.filter(c=>c==='parallel').length,1);
+test('optional text readback is forwarded to every visible save',async()=>{
+    const app=setup();await app.send('connect');
+    await app.send('start',{rows:[validRow(),validRow('09:00')],verifyAfterSave:true});
+    assert.equal((await finished(app)).run.status,'done');
+    assert(app.requests.filter(r=>r.action==='save').every(r=>r.verifyAfterSave===true));
 });
-test('остановка завершает текущую группу и не отправляет следующую',async()=>{
-    let release; const gate=new Promise(resolve=>{release=resolve;});
-    const app=setup({page:{parallel:async r=>{await gate;return {ok:true,results:r.items.map(item=>({rowId:item.row.id,ok:true,verified:true,recordId:item.row.id}))};}}});
-    await app.send('connect');const rows=['08:00','09:00','10:00','11:00'].map(validRow);
-    await app.send('draft',{draft:{rows}});await app.send('start',{rows,parallel:undefined});
+test('stop during current save finishes only that record',async()=>{
+    let release,started;const gate=new Promise(r=>release=r),saving=new Promise(r=>started=r);
+    const app=setup({page:{save:async request=>{started();await gate;return {ok:true,saved:true,verified:true,recordId:request.row.id};}}});
+    await app.send('connect');const rows=['08:00','09:00','10:00'].map(validRow);
+    await app.send('draft',{draft:{rows}});await app.send('start',{rows});await saving;
     await app.send('stop');release();const state=await finished(app);
-    assert.equal(state.run.status,'stopped');assert.equal(state.run.results.length,3);
-    assert.equal(app.calls.filter(c=>c==='parallel').length,1);
-    assert.notEqual(state.draft.rows[3].status,'saved');
+    assert.equal(state.run.status,'stopped');assert.equal(state.run.results.length,1);
+    assert.equal(app.calls.filter(c=>c==='save').length,1);assert.notEqual(state.draft.rows[1].status,'saved');
 });
 function denseRows(count){
     return Array.from({length:count},(_,index)=>{
@@ -334,7 +332,7 @@ test('двойное быстрое подтверждение не создаё
 test('интеграция очереди и DOM: потерянное подтверждение реального сохранения не дублирует первый дневник',async()=>{
     const {JSDOM}=require('jsdom'),Adapter=require('../diary-bars-adapter'),{buildFixture}=require('./card-fixture');
     const dom=new JSDOM('<body></body>',{url:'http://fixture.invalid/'});
-    const fixture=buildFixture(dom.window,{noContextMenu:true});
+    const fixture=buildFixture(dom.window);
     const adapter=Adapter.create({document:dom.window.document,window:dom.window,isVisible:fixture.visible,timeout:180,interval:2,settleMs:8});
     let saves=0;
     const page=Object.fromEntries(['probe','prepare','release'].map(action=>[action,request=>adapter.execute(request)]));

@@ -186,6 +186,22 @@ def scrub_metadata(parts):
             out=io.BytesIO(); Image.new('RGB',(1,1),'white').save(out,format='JPEG')
             parts[name]=out.getvalue()
 
+def normalize_referral_order(root):
+    """Keep item 7 between workplace and referral reason in every representation."""
+    body = root.find('w:body', NS)
+    paragraphs = body.xpath('.//w:p', namespaces=NS)
+    def paragraph_with(token):
+        matches = [p for p in paragraphs if token in ''.join(p.xpath('.//w:t/text()', namespaces=NS))]
+        assert len(matches) == 1, f'Expected one referral paragraph for {token}'
+        return matches[0]
+    diagnosis = paragraph_with('{{icdCode}}')
+    reason = paragraph_with('{{referralReason}}')
+    while reason.getparent() is not body:
+        reason = reason.getparent()
+    assert diagnosis.getparent() is body, 'Referral item 7 must be a body paragraph'
+    reason.addprevious(diagnosis)
+
+
 def build(refs, workbook):
     templates={}; inventory={}
     for key,(number,limit,mapping) in MAPS.items():
@@ -216,11 +232,10 @@ def build(refs, workbook):
                     field=f'check{i}x{j}'; node.text=node.text.replace('□','{{'+field+'}}')
                     checkboxes[field]=options[j].strip(' -;,') if j<len(options) else field
             bold_placeholder_runs(root)
+        if key=='referral':
+            normalize_referral_order(root)
         parts['word/document.xml']=serialize(root);scrub_metadata(parts)
         html=preview(root)
-        if key=='referral':
-            # The source positions field 7 inside a drawing; expose it in the HTML field preview.
-            html += '<p>7. Код диагноза по МКБ {{icdCode}}</p>'
         templates[key]={'extension':'docx','entries':entries(parts),'fields':list(dict.fromkeys(re.findall(r'\{\{(\w+)\}\}',E.tostring(root).decode()))),'preview':html,'checkboxes':checkboxes}
         with ZipFile(refs/f'blank-{key}.docx','w') as z:
             for n,v in parts.items(): z.writestr(n,v)

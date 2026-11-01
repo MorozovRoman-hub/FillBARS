@@ -4,10 +4,10 @@ import pypdfium2 as pdfium
 
 ROOT = Path(__file__).resolve().parent / 'artifacts' / 'medical-all-print-519'
 MM_PER_PT = 25.4 / 72
-expected_one_page = {'skt', 'military', 'oncology', 'operationProtocol'}
+expected_one_page = {'skt', 'military', 'oncology', 'operationProtocol', 'cec'}
 expected_centered = {'skt', 'military', 'oncology', 'operationProtocol'}
 files = sorted(ROOT.glob('*.pdf'))
-assert len(files) == 17, f'Expected 17 print fixtures, found {len(files)}'
+assert len(files) == 20, f'Expected 20 print fixtures, found {len(files)}'
 
 for file in files:
     pdf = pdfium.PdfDocument(str(file))

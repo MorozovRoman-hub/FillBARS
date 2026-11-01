@@ -4,11 +4,15 @@ const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const {chromium} = require('playwright');
 require('../medical-templates');
+require('../histology-template');
+require('../commission-templates');
 require('../skt-template');
 require('../consent-templates');
 require('../extra-templates');
 require('../followup-templates');
 require('../medical-print-layouts');
+require('../histology-print-layout');
+require('../commission-print-layouts');
 
 const output = path.resolve(__dirname,'artifacts/medical-all-print-519');
 fs.mkdirSync(output,{recursive:true});

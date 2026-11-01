@@ -17,11 +17,16 @@ function buildFixture(window, options = {}) {
     doc.body.append(card);
     let list = null;
     let grid = null;
+    let selectedRecord = null;
     function openList() {
         if (list?.isConnected) return;
         const shell = node('div', {class:'window'});
         list = node('div', {cmptype:'Form',formname:'Fixture/Observations'});
         grid = node('div', {name:'GRID_DIRECTION_OBSERVATIONS',cmptype:'Grid'});
+        list.form = { page: {
+            getValue: () => selectedRecord?.id || '',
+            getDataSet: () => ({ data: saved.map(record => ({ ID: record.id, VIS_ID: 'visit-' + record.id })) })
+        } };
         list.append(button('Провести осмотр', openPicker), grid); shell.append(node('h2',{},'Осмотры'), list); doc.body.append(shell);
         for (const record of saved) appendRow(record);
     }
@@ -29,12 +34,13 @@ function buildFixture(window, options = {}) {
         const table = node('table'), body = node('tbody');
         const row = node('tr', {cmptype:'GridRow',keyvalue:record.id});
         row.append(node('td',{},'Учебный врач'),node('td',{},'Дневник врача'),node('td',{},record.fields.VISIT_DATE + ' ' + record.fields.VISIT_TIME));
+        row.addEventListener('click', () => { selectedRecord = record; });
         row.addEventListener('contextmenu', event => {
             menuClicks++;
             event.preventDefault();
             if (options.noContextMenu) return;
             const menu = node('div', {class:'fixture-menu'});
-            menu.append(button('Редактировать', () => { menu.remove(); openEditor(record.fields, true); }));
+            menu.append(button('Редактировать', () => { menu.remove(); openEditor(record.fields, true, record.id); }, {name:'pEDIT',cmptype:'PopupItem'}));
             doc.body.append(menu);
         });
         body.append(row); table.append(body); grid.append(table);
@@ -46,9 +52,10 @@ function buildFixture(window, options = {}) {
         row.addEventListener('dblclick', () => { shell.remove(); openEditor(); });
         body.append(row); table.append(body); shell.append(table); doc.body.append(shell);
     }
-    function openEditor(values = {}, editing = false) {
+    function openEditor(values = {}, editing = false, recordId = '') {
         const shell = node('div', {class:'window'});
         const form = node('div', {cmptype:'Form',formname:'UniversalTemplate/UniversalTemplate',id:'fixture-editor-' + nextId});
+        form.form = { page: { getVar: name => name === 'DIR_SERVICE' ? String(nextId) : name === 'VISIT' && editing ? (options.wrongReadbackId ? 'other-visit' : 'visit-' + recordId) : '' } };
         shell.append(node('h2',{},(editing ? 'Редактирование приема: ' : 'Добавление приема : ') + 'Учебный Пациент Тестович, 46 лет'), form);
         const service = node(options.directControls?'input':'div', {name:'Ctrl_SERVICE',cmptype:'ButtonEdit'}), serviceInput = options.directControls?service:node('input');
         serviceInput.value = 'Дневник врача'; if(service!==serviceInput)service.append(serviceInput);
@@ -62,6 +69,7 @@ function buildFixture(window, options = {}) {
             if (text) wrapper.append(node('input',{class:'fta_sinput'}));
             const input = node(text?'textarea':'input',text?{name:name+'_Text',maxlength:'4000'}:{});
             input.value = values[semantic] ?? (text?'Текст из настроек БАРС':'111');
+            if (editing && options.readonlyReadback) input.readOnly = true;
             wrapper.append(input); form.append(wrapper);
         }
         form.append(button('Сохранить', () => {
@@ -70,6 +78,7 @@ function buildFixture(window, options = {}) {
             const fields = {};
             for (const semantic of Object.keys(NAMES)) fields[semantic] = form.querySelector('[template_field="'+semantic+'"] '+(['S_DNEVNIK','STAC_PLAN','RECOMEND_CONS'].includes(semantic)?'textarea':'input')).value;
             if (options.saveMode === 'mismatch') fields.RECOMEND_CONS += ' изменено сервером';
+            if (options.persistChanges) Object.assign(fields, options.persistChanges);
             const record = {id:String(nextId++),fields};
             saved.push(record); shell.remove();
             if (options.saveMode === 'no-list-row') return;
@@ -77,7 +86,7 @@ function buildFixture(window, options = {}) {
             else appendRow(record);
         },{name:'Btn_SaveClose',enabled:'true'}));
         form.append(button('Применить', () => { throw new Error('Неправильная кнопка сохранения'); },{name:'Btn_Save'}));
-        form.append(button('Отмена',()=>shell.remove()));
+        form.append(button('Отмена',()=>shell.remove(),{name:'Btn_Cancel'}));
         doc.body.append(shell);
         if(options.loadDelay){
             const originals=[...form.querySelectorAll('[template_field] input,[template_field] textarea')].map(input=>({input,value:input.value}));

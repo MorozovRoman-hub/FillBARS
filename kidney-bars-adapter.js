@@ -56,6 +56,18 @@
         }
         return {};
     }
+    function heightFromRows(rows){
+        for(const row of rows){
+            const name=tidy(row.ANTHROP_NAME||row.ANTHROP).toLowerCase();
+            if(!/^(?:рост|длина тела)(?:\s*\([^)]*\))?$/.test(name))continue;
+            const unit=tidy(row.MEAS).toLowerCase();
+            const raw=tidy(row.A_VALUE).replace(',','.');
+            if(!/^\d+(?:\.\d+)?$/.test(raw))continue;
+            const value=Number(raw),height=/^(?:см\.?|cm)$/.test(unit)?value:/^(?:м\.?|m)$/.test(unit)?value*100:NaN;
+            if(Number.isFinite(height)&&height>=50&&height<=250)return {height:String(Number(height.toFixed(4))),heightSource:'Общие сведения'};
+        }
+        return {};
+    }
     async function read({timeout=8000}={}){
         try{if(scope.frameElement?.hasAttribute('data-fillbars-background')||scope.frameElement?.hasAttribute('data-fillbars-patient-details'))return {historyFound:false};}catch(_){return {historyFound:false};}
         const allHistories=Array.from(scope.document.querySelectorAll('.hosp_history_new')).filter(element=>element.isConnected);
@@ -119,7 +131,7 @@
         const constitution=openRows('.patients_information','ArmPatientsInDep/patients_information','DS_CONSITUTION_SPS')
             ||[];
         if(!constitution.length)constitution.push(...await dataset('ArmPatientsInDep/patients_information','DS_CONSITUTION_SPS'));
-        Object.assign(data,weightFromRows(constitution));
+        Object.assign(data,weightFromRows(constitution),heightFromRows(constitution));
         const labs=openRows('.wrap_analyses','ArmPatientsInDep/Wrappers/analyses','DS_ANALYSES');
         if(!labs.length)labs.push(...await dataset('ArmPatientsInDep/Wrappers/analyses','DS_ANALYSES',100));
         data.labHistory={creatinine:[],hemoglobin:[],glucose:[]};
@@ -135,11 +147,12 @@
         Object.assign(data,glucoseFromRows(labs));
         if(!current())throw new Error('Пациент изменился во время чтения исследований.');
         if(!data.weight)data.warnings.push('Масса тела не найдена в Общих сведениях. Проверьте осмотр приёмного отделения или введите её вручную.');
+        if(!data.height)data.warnings.push('Рост не найден в Общих сведениях. Введите проверенный рост вручную для расчёта ИМТ.');
         if(!data.creatinine)data.warnings.push('Креатинин с единицей измерения не найден среди последних 100 лабораторных направлений.');
         if(!data.hemoglobin)data.warnings.push('Гемоглобин с единицей измерения не найден среди последних 100 лабораторных направлений.');
         if(!data.glucose)data.warnings.push('Глюкоза с единицей измерения не найдена среди последних 100 лабораторных направлений.');
         return data;
     }
-    const api={read,creatinineFromRows,hemoglobinFromRows,glucoseFromRows,weightFromRows};scope.FillBARSKidneyBars=api;
+    const api={read,creatinineFromRows,hemoglobinFromRows,glucoseFromRows,weightFromRows,heightFromRows};scope.FillBARSKidneyBars=api;
     if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

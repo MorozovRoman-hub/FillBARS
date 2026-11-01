@@ -152,16 +152,69 @@
             button.className = 'schedule-item';
             button.type = 'button';
             button.setAttribute('aria-current', String(item.id === selected));
-            const status = item.status === 'saved' ? 'Сохранён' : item.reviewed ? 'Проверен' : '';
+            const receipt = state?.run?.results?.find(result => result.rowId === item.id);
+            if (['mismatch', 'unavailable'].includes(receipt?.verification)) button.classList.add('verification-issue');
+            const status = item.status === 'saved' ? receipt?.verification === 'readback' ? 'Сверен' : receipt?.verification === 'mismatch' ? 'Расхождения' : receipt?.verification === 'unavailable' ? 'Не сверен' : 'Сохранён' : item.reviewed ? 'Проверен' : '';
             button.innerHTML = '<span class="row-number">' + String(index + 1).padStart(2, '0') + '</span><span><span class="row-time">' + escape(item.time || '—:—') + '</span><span class="row-date">' + escape(C.barsDate(item.date) || 'Без даты') + '</span></span><span class="row-status">' + status + '</span>';
             button.addEventListener('click', () => { selected = item.id; resetErrors(); render(); });
             return button;
         }));
     }
+    const fieldLabels = { VISIT_DATE: 'Дата', VISIT_TIME: 'Время', TEMPERATURE: 'Температура', AD: 'АД', THSS: 'ЧСС', THD: 'ЧД', S_DNEVNIK: 'Дневник', STAC_PLAN: 'План обследования', RECOMEND_CONS: 'План лечения', temperature: 'Температура', pressure: 'АД', pulse: 'ЧСС', respiration: 'ЧД', diary: 'Дневник', examination: 'План обследования', treatment: 'План лечения' };
+    function reviewNode(parent, tag, text, className = '') {
+        const node = document.createElement(tag); node.textContent = text; node.className = className; parent.append(node); return node;
+    }
+    function renderVerification() {
+        const run = state?.run, results = run?.results || [];
+        $('verificationPanel').hidden = !results.length;
+        $('verificationResults').replaceChildren();
+        for (const result of results) {
+            const index = run.rows.findIndex(item => item.id === result.rowId), savedRow = run.rows[index];
+            if (!savedRow) continue;
+            const issue = ['mismatch', 'unavailable'].includes(result.verification);
+            const box = reviewNode($('verificationResults'), 'details', '', 'verification-item' + (issue ? ' verification-issue' : ''));
+            box.open = issue;
+            const status = { readback: 'Все 9 полей совпадают', list: 'Добавлено в список осмотров; текст повторно не считывался', mismatch: 'Есть расхождения', unavailable: 'Содержимое не удалось прочитать', manual: 'Сохранение подтверждено вручную' }[result.verification] || 'Создание подтверждено; повторная сверка не отмечена';
+            reviewNode(box, 'summary', 'Запись ' + (index + 1) + ' · ' + C.barsDate(savedRow.date) + ' ' + savedRow.time + ' — ' + status);
+            if (result.verification === 'unavailable') reviewNode(box, 'p', 'Запись найдена в списке БАРС. Проверьте дату, время, показатели и тексты вручную. Повторной отправки не было.');
+            const expected = C.fields(savedRow);
+            for (const difference of result.differences || []) {
+                reviewNode(box, 'h3', fieldLabels[difference.field] || difference.field);
+                reviewNode(box, 'strong', 'Отправлено');reviewNode(box, 'pre', expected[difference.field] || '(пусто)', 'verification-value');
+                reviewNode(box, 'strong', 'Прочитано из БАРС');reviewNode(box, 'pre', difference.actual || '(пусто)', 'verification-value');
+                if (difference.truncated) reviewNode(box, 'p', 'Показана часть прочитанного значения. Полный текст проверьте в БАРС.');
+            }
+        }
+    }
+    function renderComparison() {
+        const current = row(), baseline = current.comparison;
+        $('comparisonPanel').hidden = !baseline;
+        $('comparisonFields').replaceChildren();
+        for (const field of [...C.vitalFields, ...C.textFields]) {
+            const previous = C.vitalFields.includes(field) ? baseline?.vitals?.[field] : baseline?.[field];
+            const value = C.vitalFields.includes(field) ? current.vitals[field] : current[field];
+            $(field).classList.toggle('field-inherited', !!baseline && value === previous);
+            $(field).classList.toggle('field-changed', !!baseline && value !== previous);
+        }
+        if (!baseline) return;
+        $('comparisonTitle').textContent = baseline.label || 'Изменения относительно предыдущего дневника';
+        for (const field of C.vitalFields) {
+            const previous = baseline.vitals?.[field] || '', value = current.vitals[field];
+            reviewNode($('comparisonFields'), 'p', fieldLabels[field] + ': ' + (value === previous ? (value || '(пусто)') + ' — унаследовано' : (previous || '(пусто)') + ' → ' + (value || '(пусто)')), value === previous ? 'diff-equal' : 'diff-added');
+        }
+        for (const field of C.textFields) {
+            reviewNode($('comparisonFields'), 'h3', fieldLabels[field]);
+            const line = reviewNode($('comparisonFields'), 'div', '', 'diff-text');
+            const parts = C.diffText(baseline[field], current[field]);
+            if (!parts.length) reviewNode(line, 'span', '(пусто) — унаследовано', 'diff-equal');
+            for (const part of parts) reviewNode(line, part.type === 'removed' ? 'del' : 'span', part.text, 'diff-' + part.type);
+        }
+    }
     function renderRun() {
         const run = state?.run;
         $('runPanel').hidden = !run;
         if (!run) return;
+        $('runPanel').classList.toggle('verification-warning', (run.results || []).some(result => ['mismatch', 'unavailable'].includes(result.verification)));
         const titles = { running: 'Отправка в БАРС', done: 'Готово', filled: 'Форма заполнена', failed: 'Очередь остановлена', uncertain: 'Нужно проверить результат в БАРС', interrupted: 'Работа прервалась', stopped: 'Остановлено' };
         $('runTitle').textContent = titles[run.status] || 'Состояние очереди';
         $('runMessage').textContent = run.message || '';
@@ -182,6 +235,11 @@
             const remaining = pending.filter(item => item.id !== current.id).length;
             $('runRecovery').textContent = 'Проверьте в БАРС запись ' + ((run.index || 0) + 1) + ' за ' + C.barsDate(current.date) + ' в ' + current.time + '. Если она сохранена, подтвердите кнопкой ниже. ' + (remaining ? 'Затем отправятся остальные записи: ' + remaining + '. Текущая повторно не отправится.' : 'Это последняя запись. Подтверждение завершит очередь.') + ' Черновики останутся в окне.';
             $('resolveRun').textContent = remaining ? 'Запись сохранена — продолжить' : 'Запись сохранена — завершить';
+            const receipt = run.results?.find(result => result.rowId === current.id);
+            if (['mismatch', 'unavailable'].includes(receipt?.verification)) {
+                $('runRecovery').textContent = 'Запись создана. Сверьте все поля и при необходимости исправьте её в БАРС. ' + (receipt.verification === 'mismatch' ? 'Расхождения показаны ниже. ' : 'Повторное чтение было недоступно. ') + 'Подтверждение ниже означает, что вы вручную проверили запись; повторной отправки этой записи не будет.';
+                $('resolveRun').textContent = remaining ? 'Все поля проверены — продолжить' : 'Все поля проверены — завершить';
+            }
         } else {
             $('runRecovery').textContent = 'Подтверждено записей: ' + (run.results?.length || 0) + '. Осталось: ' + pending.length + '. Продолжение пропустит уже сохранённые записи.';
             $('resolveRun').textContent = run.fillOnly ? 'Продолжить заполнение без сохранения' : pending.length ? 'Продолжить оставшиеся записи' : 'Завершить очередь';
@@ -196,7 +254,7 @@
         const run = state?.run;
         if (!run?.trace?.length) return;
         // Export technical events only; never export patient identity, rows or their texts.
-        const data = { format: 'fillbars-card-log-v1', version: window.chrome?.runtime?.getManifest?.().version || 'preview', build: window.chrome?.runtime?.getManifest?.().version_name || '', parallel: !!run.parallel, status: run.status, phase: run.phase, code: run.code || '', events: run.trace };
+        const data = { format: 'fillbars-card-log-v1', version: window.chrome?.runtime?.getManifest?.().version || 'preview', build: window.chrome?.runtime?.getManifest?.().version_name || '', parallel: !!run.parallel, verifyAfterSave: run.verifyAfterSave === true, status: run.status, phase: run.phase, code: run.code || '', events: run.trace };
         const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = 'fillbars-card-log.json'; link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -205,7 +263,7 @@
         if (!draft.rows.length) { draft.rows.push(C.createRow({ defaults: settings.defaults, autoPick: settings.autoPick, spread: settings.spread })); selected = draft.rows[0].id; }
         const current = row();
         selected = current.id;
-        renderProfiles(); renderList(); renderRun();
+        renderProfiles(); renderList(); renderRun(); renderVerification(); renderComparison();
         const patient = connected || running() || unresolved() ? state?.patient : null;
         $('patientName').textContent = patient?.fullName || (busy ? 'Определяем пациента…' : 'Карточка не найдена');
         $('patientDetails').textContent = patient ? 'Дата рождения: ' + patient.birth + ' · История болезни: ' + patient.history : 'Откройте карточку БАРС и нажмите «Дневники» в расширении.';
@@ -221,10 +279,19 @@
         $('hourStep').value = draft.hourStep || 4;
         $('rowBadge').textContent = current.status === 'saved' ? 'Сохранена' : current.reviewed ? 'Проверена' : 'Черновик';
         $('rowBadge').className = 'badge' + (current.reviewed || current.status === 'saved' ? ' ready' : '');
+        const receipt = state?.run?.results?.find(result => result.rowId === current.id);
+        if (current.status === 'saved' && receipt?.verification === 'readback') $('rowBadge').textContent = 'Сохранена · все поля сверены';
+        if (current.status === 'saved' && ['mismatch', 'unavailable'].includes(receipt?.verification)) {
+            $('rowBadge').textContent = receipt.verification === 'mismatch' ? 'Сохранена · есть расхождения' : 'Сохранена · текст не сверён';
+            $('rowBadge').className = 'badge verification-issue';
+        }
         const profile = library.profiles.find(item => item.id === current.profileId);
         const variant = profile?.variants.find(item => item.id === current.variantId);
         $('variantLabel').textContent = profile ? profile.name + (variant ? ' · ' + variant.title : '') : 'Свободный текст';
         const readOnly = locked() || current.status === 'saved';
+        $('draftSideChoice').hidden = !['left', 'right'].includes(draft.historySide);
+        $('draftSide').value = draft.historySide || 'left';
+        $('draftSide').disabled = locked() || draft.rows.some(item => item.status === 'saved');
         $('rowFields').disabled = readOnly;
         $('reviewed').disabled = readOnly;
         for (const id of ['addTime', 'addDay', 'profile', 'hourStep', 'clearDraft']) $(id).disabled = locked();
@@ -250,6 +317,7 @@
             $('rowBadge').textContent = 'Черновик';
             $('rowBadge').className = 'badge';
             renderList();
+            renderComparison();
             $('readyCount').textContent = 'Проверено ' + draft.rows.filter(item => item.reviewed).length + ' из ' + draft.rows.length;
             for (const name of C.textFields) $(name + 'Count').textContent = current[name].length + ' / 4000';
             $(field).removeAttribute('aria-invalid');
@@ -282,6 +350,7 @@
         const variant = C.chooseVariant({ variants: alternatives.length ? alternatives : eligible });
         if (!variant) return message('Для этой позиции нет варианта, отличающегося от соседних записей.');
         if (current.profileId === profile.id && C.textFields.every(field => current[field] === variant[field])) return message('Другого варианта без повторения соседних дневников сейчас нет.');
+        current.comparison = { ...C.comparisonSnapshot(current), label: 'Изменения после смены шаблона' };
         Object.assign(current, { diary: variant.diary, examination: variant.examination, treatment: variant.treatment, profileId: profile.id, variantId: variant.id, reviewed: false });
         draft.profileId = profile.id;
         render(); scheduleSave(); message('Шаблон применён к выбранной записи. Проверьте текст перед отправкой.');
@@ -297,6 +366,7 @@
         if (locked() || row().status === 'saved') return;
         try {
             const vitals = C.sampleVitals(row().vitals, settings.spread);
+            row().comparison = { ...C.comparisonSnapshot(row()), label: 'Изменения после подбора показателей' };
             Object.assign(row(), { vitals, reviewed: false });
             resetErrors(); render(); scheduleSave();
             message('Показатели подобраны. Проверьте запись перед отправкой.');
@@ -329,6 +399,7 @@
                 Object.assign(entry, Object.fromEntries(C.textFields.map(field => [field, variant[field]])), { variantId: variant.id });
             }
             entry.vitals = settings.autoPick ? C.sampleVitals(previous.vitals, settings.spread) : { ...previous.vitals };
+            entry.comparison = { ...C.comparisonSnapshot(source), vitals: { ...previous.vitals }, label: 'При добавлении: тексты — из записи ' + (draft.rows.indexOf(source) + 1) + ', показатели — из записи ' + draft.rows.length };
         } catch (error) { return message(error.message, true); }
         draft.rows.push(entry); selected = entry.id; resetErrors(); render(); scheduleSave();
         return true;
@@ -407,7 +478,7 @@
         busy = true; render();
         try {
             await saveDraft();
-            const response = await request('start', { rows: candidates, fillOnly });
+            const response = await request('start', { rows: candidates, fillOnly, parallel: false, verifyAfterSave: settings.verifyAfterSave });
             state = response.state; lastRunVersion = ''; message('');
         } catch (error) { message(error.message, true); }
         finally { busy = false; render(); }
@@ -415,7 +486,7 @@
     $('fillOnly').addEventListener('click', () => send(true));
     $('sendAll').addEventListener('click', () => send(false));
     $('stop').addEventListener('click', async () => {
-        try { await request('stop'); $('stop').disabled = true; $('runMessage').textContent = 'Остановка запрошена. Текущая группа завершится; следующая не начнётся.'; }
+        try { await request('stop'); $('stop').disabled = true; $('runMessage').textContent = 'Остановка запрошена. Текущая операция завершится; следующий дневник не начнётся.'; }
         catch (error) { message(error.message, true); }
     });
     async function clear(checkedInBars = false) {
@@ -458,6 +529,7 @@
         for (const field of Object.keys(C.DEFAULT_SPREAD)) $('spread' + upperFirst(field)).value = settings.spread[field];
         $('settingsHourStep').value = settings.hourStep;
         $('autoPickVitals').checked = settings.autoPick;
+        $('verifyAfterSave').checked = settings.verifyAfterSave;
         $('settingsError').hidden = true;
     }
     $('openSettings').addEventListener('click', () => { renderSettings(); $('settingsDialog').showModal(); });
@@ -475,6 +547,7 @@
                 defaults: Object.fromEntries(C.vitalFields.map(field => [field, $('settings' + upperFirst(field)).value])),
                 hourStep: $('settingsHourStep').value,
                 autoPick: $('autoPickVitals').checked,
+                verifyAfterSave: $('verifyAfterSave').checked,
                 spread: Object.fromEntries(Object.keys(C.DEFAULT_SPREAD).map(field => [field, $('spread' + upperFirst(field)).value]))
             });
             const response = await request('saveSettings', { settings: candidate });
@@ -610,14 +683,24 @@
     let editHistoryLibrary = null;
     let historyId = '';
     let historyDirty = false;
+    let historySaving = false;
+    function renderHistorySaveStatus() {
+        $('historySaveStatus').textContent = historySaving ? 'Сохраняем изменения…' : historyDirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены';
+        $('historySaveStatus').classList.toggle('unsaved', historyDirty && !historySaving);
+        $('saveHistory').disabled = historySaving || !historyDirty;
+    }
+    function markHistoryDirty() { historyDirty = true; renderHistorySaveStatus(); }
     const currentHistory = () => editHistoryLibrary?.templates.find(item => item.id === historyId);
     const historyError = error => { $('historyError').textContent = error; $('historyError').hidden = !error; };
     function renderHistory() {
+        renderHistorySaveStatus();
         const select = $('historySelect');
         select.replaceChildren(...editHistoryLibrary.templates.map(item => new Option(item.name, item.id)));
         if (!editHistoryLibrary.templates.some(item => item.id === historyId)) historyId = editHistoryLibrary.templates[0]?.id || '';
         select.value = historyId;
         const template = currentHistory();
+        $('historySideChoice').hidden = !template?.side;
+        $('historySide').value = template?.side || 'left';
         $('historyName').value = template?.name || '';
         $('historyName').disabled = !template;
         $('deleteHistory').disabled = !template;
@@ -631,7 +714,7 @@
                 const input = document.createElement('input'); input.type = type; input.value = value;
                 input.addEventListener('input', onInput); wrap.append(input); return wrap;
             };
-            head.append(field('Название', entry.title, 'text', event => { entry.title = event.target.value; historyDirty = true; }));
+            head.append(field('Название', entry.title, 'text', event => { entry.title = event.target.value; markHistoryDirty(); }));
             for (const [label, divisor, modulus] of [['Дни', 1440, 60], ['Часы', 60, 24], ['Минуты', 1, 60]]) {
                 const value = divisor === 1440 ? Math.floor(entry.offsetMinutes / 1440) : divisor === 60 ? Math.floor(entry.offsetMinutes / 60) % 24 : entry.offsetMinutes % 60;
                 head.append(field(label, value, 'number', event => {
@@ -639,48 +722,86 @@
                     if (!Number.isInteger(n) || n < 0 || (divisor !== 1440 && n >= modulus)) return;
                     const days = Math.floor(entry.offsetMinutes / 1440), hours = Math.floor(entry.offsetMinutes / 60) % 24, minutes = entry.offsetMinutes % 60;
                     entry.offsetMinutes = (divisor === 1440 ? n : days) * 1440 + (divisor === 60 ? n : hours) * 60 + (divisor === 1 ? n : minutes);
-                    historyDirty = true;
+                    markHistoryDirty();
                 }));
             }
             const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger'; remove.textContent = '×'; remove.title = 'Удалить дневник';
-            remove.addEventListener('click', () => { if (template.entries.length <= 1) return historyError('В шаблоне должен остаться хотя бы один дневник.'); template.entries.splice(index, 1); historyDirty = true; renderHistory(); });
+            remove.addEventListener('click', () => { if (template.entries.length <= 1) return historyError('В шаблоне должен остаться хотя бы один дневник.'); template.entries.splice(index, 1); markHistoryDirty(); renderHistory(); });
             head.append(remove); box.append(head);
+            entry.vitals ||= Object.fromEntries(C.vitalFields.map(name => [name, '']));
+            const vitals = document.createElement('div'); vitals.className = 'history-entry-vitals';
+            for (const [name, label] of [['temperature', 'Температура, °C'], ['pressure', 'АД, мм рт. ст.'], ['pulse', 'ЧСС, уд/мин'], ['respiration', 'ЧД, в минуту']]) {
+                const wrap = field(label, entry.vitals[name] || '', 'text', event => { entry.vitals[name] = event.target.value; markHistoryDirty(); });
+                const input = wrap.querySelector('input'); input.maxLength = 67; input.dataset.historyVital = name; input.autocomplete = 'off';
+                vitals.append(wrap);
+            }
+            box.append(vitals);
             for (const [name, label] of [['diary', 'Дневник'], ['examination', 'План обследования'], ['treatment', 'План лечения']]) {
                 const wrap = document.createElement('label'); wrap.textContent = label;
                 const input = document.createElement('textarea'); input.maxLength = C.TEXT_LIMIT; input.value = entry[name];
-                input.addEventListener('input', () => { entry[name] = input.value; historyDirty = true; });
+                input.addEventListener('input', () => { entry[name] = input.value; markHistoryDirty(); });
                 wrap.append(input); box.append(wrap);
             }
             $('historyEntries').append(box);
         }
     }
     $('manageHistory').addEventListener('click', () => {
-        editHistoryLibrary = C.clone(historyLibrary); historyId = editHistoryLibrary.templates[0]?.id || ''; historyDirty = false;
+        editHistoryLibrary = C.clone(historyLibrary);
+        historyId = historyId || draft.historyTemplateId || (draft.historySide ? 'renal-colic-history-v1' : '') || editHistoryLibrary.templates[0]?.id || '';
+        historyDirty = false;
         $('historyFirstDate').value = row().date; $('historyFirstTime').value = row().time;
         historyError(''); renderHistory(); $('historyDialog').showModal();
     });
     $('historySelect').addEventListener('change', () => { historyId = $('historySelect').value; renderHistory(); });
-    $('historyName').addEventListener('input', () => { const template = currentHistory(); if (template) { template.name = $('historyName').value; historyDirty = true; } });
+    $('draftSide').addEventListener('change', () => {
+        const side = $('draftSide').value;
+        if (locked() || draft.rows.some(item => item.status === 'saved') || !['left', 'right'].includes(draft.historySide) || !['left', 'right'].includes(side)) { render(); return; }
+        if (side === draft.historySide) return;
+        try {
+            const rows = draft.rows.map(item => ({ ...C.switchSideTexts(item), comparison: { ...C.comparisonSnapshot(item), label: 'Изменения после смены стороны' }, reviewed: false }));
+            draft.rows = rows; draft.historySide = side;
+            resetErrors(); render(); scheduleSave(); message('Сторона изменена во всех черновиках. Проверьте дневники и планы заново.');
+        } catch (error) { render(); message(error.message, true); }
+    });
+    $('historySide').addEventListener('change', () => {
+        try {
+            const index = editHistoryLibrary.templates.findIndex(item => item.id === historyId);
+            editHistoryLibrary.templates[index] = C.changeHistorySide(currentHistory(), $('historySide').value);
+            markHistoryDirty(); historyError(''); renderHistory();
+        } catch (error) { historyError(error.message); renderHistory(); }
+    });
+    $('historyName').addEventListener('input', () => { const template = currentHistory(); if (template) { template.name = $('historyName').value; markHistoryDirty(); } });
     $('newHistory').addEventListener('click', () => {
         if (editHistoryLibrary.templates.length >= 50) return historyError('Не более 50 шаблонов истории.');
         const template = { id: C.uid(), name: 'Новый шаблон истории', entries: [{ id: C.uid(), title: 'Первый дневник', offsetMinutes: 0, diary: '', examination: '', treatment: '' }] };
-        editHistoryLibrary.templates.push(template); historyId = template.id; historyDirty = true; renderHistory(); $('historyName').focus(); $('historyName').select();
+        editHistoryLibrary.templates.push(template); historyId = template.id; markHistoryDirty(); renderHistory(); $('historyName').focus(); $('historyName').select();
     });
     $('deleteHistory').addEventListener('click', () => {
         if (!currentHistory() || !confirm('Удалить этот шаблон истории? Уже созданные черновики не изменятся.')) return;
-        editHistoryLibrary.templates = editHistoryLibrary.templates.filter(item => item.id !== historyId); historyDirty = true; renderHistory();
+        editHistoryLibrary.templates = editHistoryLibrary.templates.filter(item => item.id !== historyId); markHistoryDirty(); renderHistory();
     });
     $('addHistoryEntry').addEventListener('click', () => {
         const template = currentHistory(); if (!template) return historyError('Сначала создайте шаблон.');
         if (template.entries.length >= C.MAX_ROWS) return historyError('Не более 48 дневников в шаблоне.');
         template.entries.push({ id: C.uid(), title: 'Следующий дневник', offsetMinutes: (template.entries.at(-1)?.offsetMinutes || 0) + 1440, diary: '', examination: '', treatment: '' });
-        historyDirty = true; renderHistory(); $('historyEntries').lastElementChild?.scrollIntoView({ block: 'nearest' });
+        markHistoryDirty(); renderHistory(); $('historyEntries').lastElementChild?.scrollIntoView({ block: 'nearest' });
     });
     async function saveHistoryLibrary() {
+        if (historySaving) throw new Error('Дождитесь завершения сохранения шаблонов.');
         const clean = C.cleanHistoryLibrary(editHistoryLibrary);
-        const result = await request('saveHistoryLibrary', { historyLibrary: clean });
-        historyLibrary = result.historyLibrary; editHistoryLibrary = C.clone(historyLibrary); historyDirty = false;
-        return historyLibrary;
+        historySaving = true;
+        const controls = [...$('historyDialog').querySelectorAll('input,select,textarea,button')].map(element => [element, element.disabled]);
+        for (const [element] of controls) element.disabled = true;
+        renderHistorySaveStatus();
+        try {
+            const result = await request('saveHistoryLibrary', { historyLibrary: clean });
+            historyLibrary = result.historyLibrary; editHistoryLibrary = C.clone(historyLibrary); historyDirty = false;
+            return historyLibrary;
+        } finally {
+            historySaving = false;
+            for (const [element, disabled] of controls) element.disabled = disabled;
+            renderHistorySaveStatus();
+        }
     }
     $('saveHistory').addEventListener('click', async () => {
         try { await saveHistoryLibrary(); historyError(''); renderHistory(); message('Шаблоны истории сохранены.'); }
@@ -693,20 +814,21 @@
             const template = C.cleanHistoryLibrary(editHistoryLibrary).templates.find(item => item.id === historyId);
             if (!template) throw new Error('Выберите шаблон истории.');
             const rows = C.instantiateHistoryTemplate(template, $('historyFirstDate').value, $('historyFirstTime').value);
+            rows.forEach((item, index) => { if (index) item.comparison = { ...C.comparisonSnapshot(rows[index - 1]), label: 'Отличия от предыдущего дневника истории' }; });
             if (draft.rows.length > 1 || draft.rows.some(item => item.diary || item.examination || item.treatment || item.reviewed)) {
                 if (!confirm('Заменить текущие локальные черновики новым набором? Записи БАРС не затрагиваются.')) return;
             }
             if (historyDirty) await saveHistoryLibrary();
             clearTimeout(saveTimer); saveTimer = undefined;
             await saveChain.catch(() => undefined);
-            const nextDraft = { ...draft, rows, profileId: '' };
+            const nextDraft = { ...draft, rows, profileId: '', historySide: template.side || '', historyTemplateId: template.id };
             await request('draft', { draft: C.clone(nextDraft) });
             draft = nextDraft; selected = rows[0].id; draftRevision = 0; savedDraftRevision = 0; draftSaveError = ''; draftSaveErrorRevision = -1;
             if (state) state.draft = C.clone(draft);
             $('historyDialog').close(); resetErrors(); render(); message('Создано ' + rows.length + ' черновика(ов). Заполните показатели, проверьте каждую запись и только потом отправляйте в БАРС.');
         } catch (error) { historyError(error.message); }
     });
-    function closeHistory() { if (historyDirty && !confirm('Закрыть без сохранения изменений шаблона?')) return; $('historyDialog').close(); $('manageHistory').focus(); }
+    function closeHistory() { if (historySaving) return; if (historyDirty && !confirm('Закрыть без сохранения изменений шаблона?')) return; $('historyDialog').close(); $('manageHistory').focus(); }
     $('closeHistory').addEventListener('click', closeHistory);
     $('historyDialog').addEventListener('cancel', event => { event.preventDefault(); closeHistory(); });
     async function poll() {

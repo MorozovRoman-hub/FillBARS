@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.json'),'utf8'));
-assert.equal(manifest.version,'5.2.28');
+assert.equal(manifest.version,'5.2.43');
 assert(fs.existsSync(path.join(root,'images/consent-operation-page-1.png')));
 assert(fs.existsSync(path.join(root,'images/consent-operation-page-2.png')));
 assert.equal(manifest.manifest_version,3);

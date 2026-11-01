@@ -133,7 +133,7 @@ test('read-only BARS adapter uses one history identity and closes both temporary
         const info=options.name==='ArmPatientsInDep/patients_information';
         const ds={data:[],setData(rows){this.data=rows;}};
         return {destroyed:false,getDataSet:()=>ds,setVar(){},refreshDataSet(){
-            queueMicrotask(()=>ds.setData(info?[{ANTHROP_NAME:'Масса тела',A_VALUE:'75',MEAS:'кг'}]:[{RES:'Креатинин: 88,4 мкмоль/л',SREG_DATE:'22.10.2026'}]));
+            queueMicrotask(()=>ds.setData(info?[{ANTHROP_NAME:'Масса тела',A_VALUE:'75',MEAS:'кг'},{ANTHROP_NAME:'Рост',A_VALUE:'1,75',MEAS:'м'}]:[{RES:'Креатинин: 88,4 мкмоль/л',SREG_DATE:'22.10.2026'}]));
         }};
     };
     globalThis.closeWindow=(_unused,page)=>closed.push(page);
@@ -142,6 +142,7 @@ test('read-only BARS adapter uses one history identity and closes both temporary
         assert.equal(result.sex,'Мужской');
         assert.equal(result.birthDate,'02.03.1980');
         assert.equal(result.weight,'75');
+        assert.equal(result.height,'175');
         assert.equal(result.creatinine,'88.4');
         assert.deepEqual(opened.map(x=>x.name),['ArmPatientsInDep/patients_information','ArmPatientsInDep/Wrappers/analyses']);
         assert(opened.every(x=>x.vars.HH_ID==='19'&&x.vars.PERSMEDCARD==='11'));
@@ -150,4 +151,27 @@ test('read-only BARS adapter uses one history identity and closes both temporary
         const underModal=await bars.read({timeout:500});
         assert.equal(underModal.creatinine,'88.4');
     }finally{for(const [name,value] of Object.entries(prior)){if(value===undefined)delete globalThis[name];else globalThis[name]=value;}}
+});
+
+
+test('BMI uses kilograms and centimetres, independently of creatinine and sex',()=>{
+    const result=kidney.bodyMassIndex({weight:'72,5',height:'172',age:46});
+    assert(Math.abs(result.value-24.50649)<0.00001);
+    assert.equal(result.category.label,'Норма');
+    assert.equal(kidney.bodyMassIndex({weight:120,height:200,age:18}).category.label,'Ожирение I степени');
+    for(const [value,label] of [[15.99,'Дефицит массы III степени'],[16,'Дефицит массы II степени'],[16.99,'Дефицит массы II степени'],[17,'Дефицит массы I степени'],[18.49,'Дефицит массы I степени'],[18.5,'Норма'],[24.99,'Норма'],[25,'Избыток массы'],[29.99,'Избыток массы'],[30,'Ожирение I степени'],[34.99,'Ожирение I степени'],[35,'Ожирение II степени'],[39.99,'Ожирение II степени'],[40,'Ожирение III степени']])
+        assert.equal(kidney.bodyMassIndex({weight:value*4,height:200,age:45}).category.label,label);
+});
+test('BMI rejects absent, ambiguous or invalid measurements; adult colors require an adult age',()=>{
+    for(const [weight,height] of [['',172],[75,''],[0,172],[75,0],[75,1.72],[75,251],[401,172],['75 кг',172]]){
+        const result=kidney.bodyMassIndex({weight,height,age:45});assert.equal(result.value,null);assert.equal(result.category,null);
+    }
+    for(const age of ['',17,121]){
+        const result=kidney.bodyMassIndex({weight:100,height:160,age});assert.equal(result.category,null);assert(result.value>0);
+    }
+});
+test('BARS height parser requires height with explicit centimetres or metres',()=>{
+    assert.deepEqual(bars.heightFromRows([{ANTHROP_NAME:'Рост',A_VALUE:'172,5',MEAS:'см'}]),{height:'172.5',heightSource:'Общие сведения'});
+    assert.deepEqual(bars.heightFromRows([{ANTHROP:'Рост (м)',A_VALUE:'1,725',MEAS:'м'}]),{height:'172.5',heightSource:'Общие сведения'});
+    for(const row of [{ANTHROP_NAME:'Масса тела',A_VALUE:'172',MEAS:'см'},{ANTHROP_NAME:'Рост',A_VALUE:'172',MEAS:''},{ANTHROP_NAME:'Рост',A_VALUE:'5.7',MEAS:'ft'},{ANTHROP_NAME:'Рост',A_VALUE:'1.72',MEAS:'см'}])assert.deepEqual(bars.heightFromRows([row]),{});
 });

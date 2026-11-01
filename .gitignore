@@ -9,3 +9,9 @@ coverage/
 *.log
 test-results/
 __pycache__/
+
+# Release archives and private store verification screenshots.
+/dist/
+/foreground-tests.txt
+/store-assets/*/uploaded-package.jpg
+/store-assets/*/submitted-for-review.jpg

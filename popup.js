@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.28';
+const EXTENSION_VERSION = '5.2.43';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -1854,13 +1854,19 @@ function renderKidneyResult(){
     const hemoglobinResult=document.getElementById('hemoglobinResult');
     hemoglobinResult.className='lab-result'+(lab.hemoglobinTone(hemoglobin)?' '+lab.hemoglobinTone(hemoglobin):'');
     hemoglobinResult.querySelector('strong').textContent=Number.isFinite(hemoglobin)?String(Number(hemoglobin.toFixed(1))):'—';
+    const bmi=kidney.bodyMassIndex({weight:read('kidneyWeight'),height:read('kidneyHeight'),age:read('kidneyAge')});
+    const bmiResult=document.getElementById('bmiResult');
+    bmiResult.className='lab-result'+(bmi.category?' '+bmi.category.tone:'');
+    bmiResult.querySelector('strong').textContent=bmi.value===null?'—':bmi.value.toFixed(1);
+    bmiResult.querySelector('.bmi-category').textContent=bmi.value===null?'Нет данных':bmi.category?.label||bmi.message;
+    bmiResult.title=bmi.value===null?bmi.message:'ИМТ '+bmi.value.toFixed(2)+' кг/м² · '+(bmi.category?.label||bmi.message);
     const glucose=lab.glucoseMmolL(read('kidneyGlucose'),'ммоль/л');
     const glucoseResult=document.getElementById('glucoseResult');
     glucoseResult.className='lab-result'+(lab.glucoseTone(glucose)?' '+lab.glucoseTone(glucose):'');
     glucoseResult.querySelector('strong').textContent=Number.isFinite(glucose)?String(Number(glucose.toFixed(2))):'—';
     const brief=document.getElementById('kidneyBrief');
     if(brief){
-        const complete=result.egfr!==null&&result.crcl!==null&&Number.isFinite(hemoglobin)&&Number.isFinite(glucose);
+        const complete=result.egfr!==null&&result.crcl!==null&&Number.isFinite(hemoglobin)&&Number.isFinite(glucose)&&bmi.category!==null;
         brief.textContent=complete?'Данные готовы':'Проверьте данные';
         brief.classList.toggle('warning',!complete);
     }
@@ -1870,10 +1876,10 @@ async function refreshKidneyData(){
     const button=document.getElementById('refreshKidney'),source=document.getElementById('kidneySource');
     button.disabled=true;
     globalThis.FillBARSLabTrends.render(document.getElementById('labTrends'),null);
-    for(const id of ['kidneySex','kidneyAge','kidneyWeight','kidneyCreatinine','kidneyHemoglobin','kidneyGlucose'])document.getElementById(id).value='';
+    for(const id of ['kidneySex','kidneyAge','kidneyWeight','kidneyHeight','kidneyCreatinine','kidneyHemoglobin','kidneyGlucose'])document.getElementById(id).value='';
     document.getElementById('kidneyUnit').value='мкмоль/л';
     renderKidneyResult();
-    source.textContent='Получаю пол, возраст, массу и последний креатинин из БАРС…';
+    source.textContent='Получаю пол, возраст, массу, рост и анализы из БАРС…';
     document.getElementById('kidneyBrief').textContent='Загрузка…';
     try{
         const data=await readKidneyDataFromActiveBars();
@@ -1883,6 +1889,7 @@ async function refreshKidneyData(){
         const age=kidney.ageAt(data.birthDate);
         document.getElementById('kidneyAge').value=Number.isFinite(age)?String(age):'';
         document.getElementById('kidneyWeight').value=data.weight||'';
+        document.getElementById('kidneyHeight').value=data.height||'';
         document.getElementById('kidneyCreatinine').value=data.creatinine||'';
         const unit=String(data.creatinineUnit||'').toLowerCase();
         document.getElementById('kidneyUnit').value=/^(?:мг|mg)/.test(unit)?'мг/дл':/^(?:ммоль|mmol)/.test(unit)?'ммоль/л':'мкмоль/л';
@@ -1890,7 +1897,7 @@ async function refreshKidneyData(){
         document.getElementById('kidneyHemoglobin').value=Number.isFinite(hemoglobin)?String(Number(hemoglobin.toFixed(1))):'';
         const glucose=globalThis.FillBARSLabMarkers.glucoseMmolL(data.glucose,data.glucoseUnit);
         document.getElementById('kidneyGlucose').value=Number.isFinite(glucose)?String(Number(glucose.toFixed(2))):'';
-        const pieces=[data.creatinine?`Креатинин: лаборатория${data.creatinineDate?' от '+data.creatinineDate:''}`:'Креатинин не найден',data.weight?'Масса: Общие сведения':'Масса не найдена',Number.isFinite(hemoglobin)?`Гемоглобин: лаборатория${data.hemoglobinDate?' от '+data.hemoglobinDate:''}`:'Гемоглобин не найден',Number.isFinite(glucose)?`Глюкоза: лаборатория${data.glucoseDate?' от '+data.glucoseDate:''}`:'Глюкоза не найдена'];
+        const pieces=[data.creatinine?`Креатинин: лаборатория${data.creatinineDate?' от '+data.creatinineDate:''}`:'Креатинин не найден',data.weight?'Масса: Общие сведения':'Масса не найдена',data.height?'Рост: Общие сведения':'Рост не найден',Number.isFinite(hemoglobin)?`Гемоглобин: лаборатория${data.hemoglobinDate?' от '+data.hemoglobinDate:''}`:'Гемоглобин не найден',Number.isFinite(glucose)?`Глюкоза: лаборатория${data.glucoseDate?' от '+data.glucoseDate:''}`:'Глюкоза не найдена'];
         source.textContent=pieces.concat(data.warnings||[]).join('. ');
         globalThis.FillBARSLabTrends.render(document.getElementById('labTrends'),data.labHistory,data.labHistoryRowCount);
         renderKidneyResult();
@@ -1907,7 +1914,7 @@ async function openMedicalTemplate(event) {
         else await openTransfusionProtocol();
         return;
     }
-    if (!['military', 'commission', 'referral', 'skt', 'oncology', 'tmk', 'operationConsent', 'anesthesiaConsent', 'colonoscopyConsent', 'bronchoscopyConsent', 'gastroscopyConsent', 'thrombolysisConsent', 'operationProtocol', 'workInjury315', 'workInjury316', 'epidemicInvestigation', 'centralCatheter'].includes(template)) return;
+    if (!['military', 'commission', 'palliative', 'cec', 'referral', 'histology', 'skt', 'oncology', 'tmk', 'operationConsent', 'anesthesiaConsent', 'colonoscopyConsent', 'bronchoscopyConsent', 'gastroscopyConsent', 'thrombolysisConsent', 'operationProtocol', 'workInjury315', 'workInjury316', 'epidemicInvestigation', 'centralCatheter'].includes(template)) return;
     select.disabled = true;
     setStatus('⏳ Получаю данные для бланка…', '#ff9800');
     try {
@@ -3701,7 +3708,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('journalEnabledCheckbox').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('journalRetentionDays').addEventListener('change', saveScenarioSettingsFromUi);
     document.getElementById('refreshKidney').addEventListener('click', refreshKidneyData);
-    for(const id of ['kidneySex','kidneyAge','kidneyWeight','kidneyCreatinine','kidneyUnit','kidneyHemoglobin','kidneyGlucose']){
+    for(const id of ['kidneySex','kidneyAge','kidneyWeight','kidneyHeight','kidneyCreatinine','kidneyUnit','kidneyHemoglobin','kidneyGlucose']){
         document.getElementById(id).addEventListener('input',renderKidneyResult);
         document.getElementById(id).addEventListener('change',renderKidneyResult);
     }

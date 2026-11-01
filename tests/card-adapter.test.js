@@ -29,16 +29,16 @@ test('выбор услуги ждёт включения кнопки посл�
         assert.equal(dom.window.document.querySelector('[formname="UniversalTemplate/UniversalTemplate"]'),null);
     } finally {dom.window.close();}
 });
-test('полный цикл двух дневников подтверждается строками списка без контекстного меню и повторного открытия',async()=>{
-    const {dom,fixture,adapter,args}=await setup({noContextMenu:true});
+test('полный цикл двух дневников сверяет все сохранённые поля и закрывает повторно открытый приём без сохранения',async()=>{
+    const {dom,fixture,adapter,args}=await setup();
     for(let i=0;i<2;i++){
         args.row.time='0'+(8+i)+':00';args.row.id='row'+i;args.values=C.fields(args.row);
         const prepare=await adapter.execute({action:'prepare',...args});assert.equal(prepare.ok,true,prepare.message);
         assert.equal(fixture.saveClicks,i);
-        const save=await adapter.execute({action:'save',...args});assert.equal(save.ok,true,save.message);assert.equal(save.verified,true);assert.equal(save.verification,'list');
+        const save=await adapter.execute({action:'save',...args});assert.equal(save.ok,true,save.message);assert.equal(save.verified,true);assert.equal(save.verification,'readback');
         assert.equal(fixture.saved[i].fields.STAC_PLAN,'');assert.equal(fixture.saved[i].fields.S_DNEVNIK,'Учебный текст');
     }
-    assert.equal(fixture.saveClicks,2);assert.equal(fixture.menuClicks,0);dom.window.close();
+    assert.equal(fixture.saveClicks,2);assert.equal(fixture.menuClicks,2);assert.equal(dom.window.document.querySelector('[formname="UniversalTemplate/UniversalTemplate"]'),null);dom.window.close();
 });
 test('новый приём с предварительным текстом полностью заменяется, без сохранения',async()=>{
     const {dom,fixture,adapter,args}=await setup();fixture.openList();fixture.openEditor();
@@ -76,13 +76,38 @@ test('при неподтверждённом сохранении повтор�
     assert.equal((await adapter.execute({action:'save',...args})).ok,false);
     assert.equal(fixture.saveClicks,1);dom.window.close();
 });
-test('подтверждение по списку сообщает свой тип и не выдаётся за сверку сохранённого текста',async()=>{
+test('серверное изменение плана выявляется повторным чтением без второго сохранения',async()=>{
     const {dom,fixture,adapter,args}=await setup({saveMode:'mismatch'});await adapter.execute({action:'prepare',...args});
     const result=await adapter.execute({action:'save',...args});
-    assert.equal(result.verification,'list');assert.equal(result.ok,true);
+    assert.equal(result.verification,'mismatch');assert.equal(result.ok,true);assert.equal(result.verified,false);assert.equal(result.saved,true);
     assert.notEqual(fixture.saved[0].fields.RECOMEND_CONS,args.values.RECOMEND_CONS);
-    assert(!result.trace.some(event=>/перечитан/.test(event.stage)));
+    assert.deepEqual(result.differences,[{field:'RECOMEND_CONS',actual:fixture.saved[0].fields.RECOMEND_CONS,truncated:false}]);
+    assert(!JSON.stringify(result.trace).includes('изменено сервером'));
     assert.equal(fixture.saveClicks,1);dom.window.close();
+});
+
+test('недоступное чтение и неверный идентификатор не выдаются за совпадение',async()=>{
+    for(const options of [{noContextMenu:true},{wrongReadbackId:true}]){
+        const {dom,fixture,adapter,args}=await setup(options);
+        try{
+            await adapter.execute({action:'prepare',...args});
+            const saved=await adapter.execute({action:'save',...args});
+            assert.equal(saved.saved,true);assert.equal(saved.verified,false);assert.equal(saved.verification,'unavailable');
+            assert.equal(fixture.saveClicks,1);assert.equal((await adapter.execute({action:'save',...args})).ok,false);
+        }finally{dom.window.close();}
+    }
+});
+
+test('повторное чтение проверяет дату, время, показатели и пустые планы; readonly допускается только для чтения',async()=>{
+    const changes={VISIT_DATE:'02.09.2026',VISIT_TIME:'09:15',TEMPERATURE:'37,5',AD:'140/90',THSS:'90',THD:'20',S_DNEVNIK:'Другой текст',STAC_PLAN:'Новый план',RECOMEND_CONS:''};
+    const {dom,fixture,adapter,args}=await setup({persistChanges:changes,readonlyReadback:true});
+    try{
+        await adapter.execute({action:'prepare',...args});
+        const result=await adapter.execute({action:'save',...args});
+        assert.equal(result.verification,'mismatch');assert.equal(result.differences.length,9);
+        assert.deepEqual(Object.fromEntries(result.differences.map(item=>[item.field,item.actual])),changes);
+        assert.equal(fixture.saveClicks,1);
+    }finally{dom.window.close();}
 });
 test('существующая строка с той же датой и временем блокирует повторную подготовку',async()=>{
     const {dom,fixture,adapter,args}=await setup();
@@ -216,4 +241,16 @@ test('история сверяется с выбранным пунктом SEL
     const result=await adapter.execute({action:'prepare',...args});
     assert.equal(result.code,'editor_patient');assert(result.trace.some(entry=>entry.historyMatches===false));
     assert.equal(fixture.saveClicks,0);dom.window.close();
+});
+
+test('list confirmation skips readback and allows the next diary',async()=>{
+    const {dom,fixture,adapter,args}=await setup();
+    try {for(let i=0;i<2;i++){
+        args.row.time='0'+(8+i)+':00';args.row.id='list-row'+i;args.values=C.fields(args.row);
+        assert.equal((await adapter.execute({...args,action:'prepare'})).ok,true);
+        const result=await adapter.execute({...args,action:'save',verifyAfterSave:false});
+        assert.equal(result.saved,true);assert.equal(result.verified,true);assert.equal(result.verification,'list');
+    }
+    assert.equal(fixture.saveClicks,2);assert.equal(fixture.menuClicks,0);
+    }finally{dom.window.close();}
 });

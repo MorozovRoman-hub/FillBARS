@@ -1,14 +1,14 @@
 const test=require('node:test'), assert=require('node:assert/strict'), fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {JSDOM}=require('jsdom');
 const root=path.resolve(__dirname,'..');
-require('../office-export');require('../medical-templates');require('../skt-template');require('../consent-templates');require('../extra-templates');require('../followup-templates');require('../medical-print-layouts');require('../operation-catalog');
+require('../office-export');require('../medical-templates');require('../histology-template');require('../commission-templates');require('../skt-template');require('../consent-templates');require('../extra-templates');require('../followup-templates');require('../medical-print-layouts');require('../operation-catalog');
 const forms=require('../medical-forms');
 const templates=globalThis.__FillBARSMedicalTemplates__;
 const synthetic={fullName:'Тестов Тест Тестович',surname:'Тестов',firstName:'Тест',patronymic:'Тестович',birthDate:'02.03.1980',documentDate:'24.09.2026',medicalOrganization:'ТЕСТОВАЯ МЕДИЦИНСКАЯ ОРГАНИЗАЦИЯ',registeredAddress:'Тестовый город, улица Примерная, дом 1',passport:'ТЕСТОВЫЙ ДОКУМЕНТ',doctorName:'Тестов Т.Т.',department:'Тестовое отделение',diagnosis:'Тестовый текст для проверки оформления',icdCode:'TEST',policyNumber:'0000000000000000',snils:'000-000-000 00',destination:'Тестовое учреждение'};
 function unzipStored(bytes){const b=Buffer.from(bytes), result={};let at=0;while(b.readUInt32LE(at)===0x04034b50){const size=b.readUInt32LE(at+18),n=b.readUInt16LE(at+26),extra=b.readUInt16LE(at+28);const name=b.subarray(at+30,at+30+n).toString();const start=at+30+n+extra;result[name]=b.subarray(start,start+size);at=start+size;}return result;}
-test('seventeen genuine Office packages export, preserve untouched parts and escape XML',()=>{
+test('twenty genuine Office packages export, preserve untouched parts and escape XML',()=>{
  const out=path.join(root,'tests/artifacts/medical');fs.mkdirSync(out,{recursive:true});
- assert.equal(Object.keys(templates).length,17);
+ assert.equal(Object.keys(templates).length,20);
  for(const [kind,t]of Object.entries(templates)){
   const values={...synthetic};for(const key of Object.keys(t.checkboxes||{}))values[key]='□';
   const bytes=forms.createFile(t,values), parts=unzipStored(bytes);
@@ -224,6 +224,20 @@ test('operation examples are editable drafts without source staff or case number
  assert.equal(w.document.getElementById('instrumentCount').value,'Посчитаны, счёт сходится.');
  assert.equal(w.document.getElementById('swabCount').value,'Посчитаны, счёт сходится.');
  assert.match(w.document.getElementById('notice').textContent,/с фактическим подсчётом/);
+ const additions=JSON.parse(fs.readFileSync(path.join(root,'scripts/operation-drafts.json'),'utf8'));
+ assert.equal(additions.length,6);
+ for(const item of additions){
+  const index=catalog.findIndex(entry=>entry.name===item.name);
+  assert(index>=0,'Missing operation: '+item.name);
+  select.value=String(index);select.dispatchEvent(new w.Event('change'));
+  assert.equal(w.document.getElementById('operationName').value,item.name);
+  assert.equal(w.document.getElementById('operationDescription').value,item.text);
+  assert(w.document.querySelector('#preview').textContent.includes(item.name));
+  const xml=unzipStored(forms.createFile(templates.operationProtocol,{...synthetic,operationName:item.name,operationDescription:item.text}))['word/document.xml'].toString();
+  assert(xml.includes(item.name));
+  for(const paragraph of item.text.split('\n'))assert(xml.includes(paragraph));
+  assert(item.text.includes('[указать')||item.text.includes('[описать'));
+ }
  dom.window.close();
 });
 test('operation material count remains editable in the Word export',()=>{
@@ -236,4 +250,23 @@ test('operation description keeps editor line breaks in the editable Word file',
  const xml=unzipStored(forms.createFile(templates.operationProtocol,{...synthetic,operationDescription:'Первый этап.\nВторой этап & контроль.'}))['word/document.xml'].toString();
  assert.match(xml,/Первый этап\.<\/w:t><w:br\/><w:t xml:space="preserve">Второй этап &amp; контроль\./);
  assert(!xml.includes('{{operationDescription}}'));
+});
+
+
+test('057/u item 7 occurs once between items 6 and 8 in editor, preview and exported Word',()=>{
+ const t=templates.referral;
+ assert(t.fields.indexOf('workPlace')<t.fields.indexOf('icdCode')&&t.fields.indexOf('icdCode')<t.fields.indexOf('referralReason'));
+ const preview=new JSDOM(t.preview);
+ const texts=[...preview.window.document.querySelectorAll('p')].map(p=>p.textContent.trim());
+ assert.equal(texts.filter(text=>text.startsWith('7.')).length,1);
+ assert(texts.findIndex(text=>text.startsWith('6.'))<texts.findIndex(text=>text.startsWith('7.')));
+ assert(texts.findIndex(text=>text.startsWith('7.'))<texts.findIndex(text=>text.startsWith('8.')));
+ preview.window.close();
+ const xml=unzipStored(forms.createFile(t,{...synthetic,icdCode:'N23',workPlace:'Тестовая работа',referralReason:'Тестовое обоснование'}))['word/document.xml'].toString();
+ const word=new JSDOM(xml,{contentType:'application/xml'});
+ const paragraphs=[...word.window.document.getElementsByTagName('w:p')].map(p=>p.textContent.trim());
+ assert.equal(paragraphs.filter(text=>text.startsWith('7.')).length,1);
+ const positions=['6.','7.','8.'].map(prefix=>paragraphs.findIndex(text=>text.startsWith(prefix)));
+ assert(positions[0]>=0&&positions[0]<positions[1]&&positions[1]<positions[2]);
+ assert(paragraphs[positions[1]].includes('N23'));word.window.close();
 });

@@ -1,6 +1,6 @@
 (function (scope) {
     'use strict';
-    const titles = { military: 'Выписка для военнослужащих', commission: 'Заключение врачебной комиссии', referral: 'Направление — форма 057/у-04', oncology: 'Извещение о впервые выявленном новообразовании', tmk: 'Заявка на телемедицинскую консультацию', skt: 'Направление на СКТ', operationConsent: 'Согласие на операцию', anesthesiaConsent: 'Согласие на анестезию', colonoscopyConsent:'Согласие на колоноскопию', bronchoscopyConsent:'Согласие на бронхоскопию', gastroscopyConsent:'Согласие на гастроскопию', thrombolysisConsent:'Согласие на тромболизис', operationProtocol:'Протокол операции', workInjury315:'Медицинское заключение 315-1/у', workInjury316:'Медицинское заключение 316-1/у', epidemicInvestigation:'Карта эпидемиологического расследования', centralCatheter:'Протокол катетеризации центральной вены' };
+    const titles = { palliative: 'Заключение ВК для паллиативной помощи', cec: 'КЭК — представление и заключение', histology: 'Гистология — направление 014/у и протокол 014-1/у', military: 'Выписка для военнослужащих', commission: 'Заключение врачебной комиссии', referral: 'Направление — форма 057/у-04', oncology: 'Извещение о впервые выявленном новообразовании', tmk: 'Заявка на телемедицинскую консультацию', skt: 'Направление на СКТ', operationConsent: 'Согласие на операцию', anesthesiaConsent: 'Согласие на анестезию', colonoscopyConsent:'Согласие на колоноскопию', bronchoscopyConsent:'Согласие на бронхоскопию', gastroscopyConsent:'Согласие на гастроскопию', thrombolysisConsent:'Согласие на тромболизис', operationProtocol:'Протокол операции', workInjury315:'Медицинское заключение 315-1/у', workInjury316:'Медицинское заключение 316-1/у', epidemicInvestigation:'Карта эпидемиологического расследования', centralCatheter:'Протокол катетеризации центральной вены' };
     const oncologyChoiceSections = [
         {id:'sex',title:'05. Пол',rows:[16]},
         {id:'residence',title:'08. Житель',rows:[21]},
@@ -22,6 +22,7 @@
         return (date.getTime() - Date.UTC(1899,11,30)) / 86400000;
     }
     function createFile(template, values) {
+        values = {...template.fieldDefaults, ...values};
         const decoder = new TextDecoder(), encoder = new TextEncoder();
         return scope.__FillBARSOfficeExport__.createZip(template.entries.map(entry => {
             const bytes = Uint8Array.from(atob(entry.data), char => char.charCodeAt(0));
@@ -63,6 +64,8 @@
     if (!template) { document.getElementById('notice').textContent='Неизвестный шаблон.'; document.getElementById('download').disabled=true;return; }
     const patient=payload.patient||{}, now=new Date();
     const values={...patient, documentDate:dateText(patient.appointmentDate||`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`),birthDate:dateText(patient.birthDate),birthYear:String(patient.birthDate||'').match(/\b(?:19|20)\d{2}\b/)?.[0]||'',address:patient.registeredAddress||'',startDate:dateText(patient.startDate),endDate:dateText(patient.endDate),doctorContacts:[patient.doctorPhone,patient.doctorEmail].filter(Boolean).join(', ')};
+    for(const field of template.manualFields||[]) values[field]='';
+    for(const [field,value] of Object.entries(template.fieldDefaults||{})) values[field]=value;
     if(kind==='operationProtocol'){
         values.instrumentCount='Посчитаны, счёт сходится.';
         values.swabCount='Посчитаны, счёт сходится.';
@@ -75,6 +78,9 @@
     document.title=titles[kind];document.getElementById('title').textContent=titles[kind];
     const consentNotice='Черновик согласия из предоставленного вами образца. Проверьте актуальность и применимость текста в вашей медицинской организации. Вид вмешательства, решения, дата согласия и подписи не заполняются автоматически; пациент или представитель подписывает документ после информирования.';
     if(kind.endsWith('Consent')) document.getElementById('notice').textContent=consentNotice;
+    if(kind==='palliative') document.getElementById('notice').textContent='В решение ВК подставлен стандартный текст о признании пациента нуждающимся в паллиативной медицинской помощи. Его можно отредактировать. Заполните осмотр, рекомендации и состав комиссии, проверьте бланк перед печатью и подписанием.';
+    if(kind==='cec') document.getElementById('notice').textContent='КЭК на одном книжном листе А4: сверху представление, снизу заключение, по одному экземпляру. Решения о нетрудоспособности, МСЭ, прогнозе и цели направления заполняются вручную.';
+    if(kind==='histology') document.getElementById('notice').textContent='В образце две страницы: направление 014/у и протокол 014-1/у. Проверьте сведения пациента и данные о материале. Протокол исследования заполняет лаборатория; даты забора, фиксация и заключение автоматически не определяются.';
     if(kind==='operationProtocol') document.getElementById('notice').textContent='Черновик протокола: описание операции необходимо сверить с фактически выполненным вмешательством, а предзаполненную запись о совпадении счёта инструментов и салфеток — с фактическим подсчётом до печати. Неподтверждённые сведения исправьте или удалите.';
     if(kind==='workInjury315'||kind==='workInjury316') document.getElementById('notice').textContent='Заключение по форме 315-1/у или 316-1/у: степень тяжести, окончательный диагноз и подпись не определяются автоматически. Проверьте данные и заполните их после медицинской оценки.';
     if(kind==='epidemicInvestigation') document.getElementById('notice').textContent='Карта эпидемиологического расследования: автоматически подставлены только имеющиеся сведения о пациенте. Выводы расследования и остальные разделы заполняет ответственный специалист.';
@@ -93,6 +99,7 @@
         printFrame=document.createElement('iframe');
         printFrame.className='source-preview-frame';
         printFrame.title='Предпросмотр исходного бланка';
+        if(sourceLayout.landscape) printFrame.style.width='calc(297mm + 24px)';
         printFrame.setAttribute('sandbox','allow-same-origin allow-modals');
         printFrame.addEventListener('load',()=>{
             try{printFrame.style.height=Math.max(1123,printFrame.contentDocument.documentElement.scrollHeight+8)+'px';}
@@ -138,9 +145,12 @@
         for(const field of section.fields) choiceSectionByField.set(field,section);
     }
     for(const field of template.fields){
+        if(template.fieldSections?.[field]){
+            const heading=document.createElement('h2');heading.className='field-section-title';heading.textContent=template.fieldSections[field];container.append(heading);
+        }
         if(kind==='operationProtocol'&&field==='operationName'){
             const wrapper=document.createElement('div');wrapper.className='choice-section';
-            const heading=document.createElement('label');heading.htmlFor='operationDraft';heading.textContent='Пример операции из папки «РВ»';
+            const heading=document.createElement('label');heading.htmlFor='operationDraft';heading.textContent='Шаблон операции';
             const select=document.createElement('select');select.id='operationDraft';
             for(const [index,item] of [{name:'Выберите шаблон…'},...(scope.__FillBARSOperationCatalog__||[])].entries()){
                 const option=document.createElement('option');option.value=index?String(index-1):'';option.textContent=item.name;select.append(option);
@@ -183,10 +193,10 @@
             continue;
         }
         const label=document.createElement('label');const options=template.options?.[field];
-        const input=document.createElement(options?'select':field.includes('Address')||['diagnosis','passport','referralReason','clinicalInfo','studyRestrictions','studyPurpose','operationPlan','operationDescription','intraoperativeComplications','equipment','postopDiagnosis'].includes(field)?'textarea':'input');
+        const input=document.createElement(options?'select':template.multilineFields?.includes(field)||field.includes('Address')||['diagnosis','passport','referralReason','clinicalInfo','studyRestrictions','studyPurpose','operationPlan','operationDescription','intraoperativeComplications','equipment','postopDiagnosis'].includes(field)?'textarea':'input');
         if(options) for(const choice of ['',...options]){const option=document.createElement('option');option.value=choice;option.textContent=choice.trim()||'Не выбрано';input.append(option);}
         const check=Object.hasOwn(template.checkboxes||{},field);
-        label.textContent=check ? template.checkboxes[field] : labels[field]||field;
+        label.textContent=check ? template.checkboxes[field] : template.labels?.[field]||labels[field]||field;
         input.id=field;input.name=field;label.htmlFor=field;
         if(check){ input.type='checkbox';values[field]='□'; } else input.value=values[field]||'';
         input.addEventListener('input',()=>{values[field]=check?(input.checked?'☑':'□'):input.value;refresh();});

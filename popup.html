@@ -244,10 +244,10 @@
 
         .kidney-panel{border:1px solid #cbd9d1;border-radius:7px;padding:10px;background:#f8fbf9;font-size:12px}
         .kidney-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700}
-        .kidney-head button{padding:5px 8px;font-size:11px}
-        .kidney-lab-row{display:grid;grid-template-columns:minmax(0,2.4fr) repeat(2,minmax(0,1fr));gap:7px;margin-top:7px;align-items:stretch}
+        .kidney-head button{width:auto;flex-shrink:0;padding:5px 8px;font-size:11px}
+        .kidney-lab-row{display:grid;grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr));gap:7px;margin-top:7px;align-items:stretch}
         .kidney-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;border-radius:5px;background:#e9efeb}
-        .kidney-result{padding:6px;min-height:66px;min-width:0}
+        .kidney-result{padding:5px;min-height:66px;min-width:0}
         #egfrResult{border-right:1px solid #cbd9d1}
         .kidney-result strong{display:block;font-size:19px;line-height:1.2}
         .kidney-result small{display:block;font-size:9px;line-height:1.2;overflow-wrap:anywhere}
@@ -259,6 +259,15 @@
         .lab-result.hb-low{background:#f7a9a9;color:#7f111b}.lab-result.hb-borderline{background:#ffddb7;color:#934616}
         .lab-result.glucose-low,.lab-result.glucose-high{background:#f7a9a9;color:#7f111b}
         .lab-result.glucose-borderline{background:#ffddb7;color:#934616}
+        .lab-result.bmi-underweight-1{background:#fff0b3;color:#745614}
+        .lab-result.bmi-underweight-2{background:#ffddb7;color:#934616}
+        .lab-result.bmi-underweight-3{background:#ed9aa5;color:#75132b}
+        .lab-result.bmi-normal{background:#dceee1;color:#176c3a}
+        .lab-result.bmi-overweight{background:#fff0b3;color:#745614}
+        .lab-result.bmi-obesity-1{background:#ffddb7;color:#934616}
+        .lab-result.bmi-obesity-2{background:#f7b9a9;color:#8b3020}
+        .lab-result.bmi-obesity-3{background:#ed9aa5;color:#75132b}
+        #bmiResult small{white-space:normal;overflow-wrap:anywhere;line-height:1.2}
         .kidney-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:8px}
         .kidney-details{margin-top:7px}.kidney-details summary{cursor:pointer;color:#315b48;font-size:11px}
         .kidney-brief{font-size:10px;color:#64756b;margin-left:4px}.kidney-brief.warning{color:#a05a1b}
@@ -489,7 +498,7 @@
 </head>
 <body>
     <header class="app-header">
-        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.28</small></h3>
+        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.43</small></h3>
         <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
     </header>
 
@@ -518,7 +527,10 @@
                 <option value="transfusionProtocol">Протокол гемотрансфузии</option>
                 <option value="military">Выписка для военнослужащих</option>
                 <option value="commission">Заключение врачебной комиссии</option>
+                <option value="palliative">ВК — паллиативная помощь</option>
+                <option value="cec">КЭК — представление и заключение</option>
                 <option value="referral">Направление 057/у-04</option>
+                <option value="histology">Гистология — направление и протокол</option>
                 <option value="skt">Направление на СКТ</option>
                 <option value="oncology">Впервые выявленное новообразование</option>
                 <option value="tmk">Телемедицинская консультация (Excel)</option>
@@ -544,7 +556,7 @@
 
     <div class="button-stack">
         <button id="fillForm" type="button">✅ Открыть лабораторию и заполнить</button>
-        <div class="kidney-panel" aria-label="СКФ, клиренс, гемоглобин и глюкоза">
+        <div class="kidney-panel" aria-label="СКФ, клиренс, гемоглобин, индекс массы тела и глюкоза">
             <div class="kidney-head"><span>СКФ и анализы</span><button id="refreshKidney" class="secondary" type="button">Обновить из БАРС</button></div>
             <div class="kidney-lab-row">
                 <div class="kidney-results" aria-label="СКФ по CKD-EPI и клиренс по Кокрофту—Голту">
@@ -552,6 +564,7 @@
                     <div id="crclResult" class="kidney-result"><small>Клиренс Кокрофта—Голта</small><strong>—</strong><small>мл/мин</small></div>
                 </div>
                 <div id="hemoglobinResult" class="lab-result"><span>Гемоглобин</span><strong>—</strong><small>г/л</small></div>
+                <div id="bmiResult" class="lab-result" aria-live="polite"><span title="Индекс массы тела">ИМТ</span><strong>—</strong><small>кг/м²</small><small class="bmi-category">Нет данных</small></div>
                 <div id="glucoseResult" class="lab-result"><span>Глюкоза</span><strong>—</strong><small>ммоль/л</small></div>
             </div>
             <details class="kidney-details"><summary>Исходные данные и ручная проверка <span id="kidneyBrief" class="kidney-brief">Проверьте данные</span></summary>
@@ -559,13 +572,14 @@
                 <label>Пол<select id="kidneySex"><option value="">Не найден</option><option value="male">Мужской</option><option value="female">Женский</option></select></label>
                 <label>Возраст, лет<input id="kidneyAge" type="number" min="18" max="120" inputmode="numeric"></label>
                 <label>Масса тела, кг<input id="kidneyWeight" type="number" min="2" max="400" step="0.1" inputmode="decimal"></label>
+                <label>Рост, см<input id="kidneyHeight" type="number" min="50" max="250" step="0.1" inputmode="decimal"></label>
                 <label>Креатинин<input id="kidneyCreatinine" type="number" min="0.1" step="0.1" inputmode="decimal"></label>
                 <label>Единица креатинина<select id="kidneyUnit"><option value="мкмоль/л">мкмоль/л</option><option value="ммоль/л">ммоль/л</option><option value="мг/дл">мг/дл</option></select></label>
                 <label>Гемоглобин, г/л<input id="kidneyHemoglobin" type="number" min="1" step="0.1" inputmode="decimal"></label>
                 <label>Глюкоза, ммоль/л<input id="kidneyGlucose" type="number" min="0.1" step="0.01" inputmode="decimal"></label>
             </div>
             <p id="kidneySource" class="kidney-note" role="status">Данные ещё не получены.</p>
-            <p class="kidney-note">Категория G1–G5 — только по СКФ. Один анализ не подтверждает хроническую болезнь почек; проверьте дату и единицы креатинина. Цвет гемоглобина — ориентир по заданным порогам, не решение о переливании. Цвет глюкозы — ориентир для анализа натощак: &lt;3,9 или ≥7,0 — красный, 5,6–6,9 — оранжевый; если кровь сдана не натощак, оцените результат по условиям анализа и референсу лаборатории.</p>
+            <p class="kidney-note">Категория G1–G5 — только по СКФ. Один анализ не подтверждает хроническую болезнь почек; проверьте дату и единицы креатинина. ИМТ = масса / рост². Шкала с 18 лет: 17–&lt;18,5 — дефицит массы I степени; 16–&lt;17 — II; &lt;16 — III; 18,5–&lt;25 — норма; 25–&lt;30 — избыток; 30–&lt;35, 35–&lt;40, ≥40 — ожирение I, II, III степени. Степени дефицита массы по ИМТ не равны диагнозу недостаточности питания. Цвет гемоглобина — ориентир по заданным порогам, не решение о переливании. Цвет глюкозы — ориентир для анализа натощак: &lt;3,9 или ≥7,0 — красный, 5,6–6,9 — оранжевый; если кровь сдана не натощак, оцените результат по условиям анализа и референсу лаборатории.</p>
             </details>
             <details class="lab-trends"><summary>Динамика анализов</summary><div id="labTrends" aria-live="polite"><p class="trend-note">Обновите данные из БАРС, чтобы увидеть динамику.</p></div></details>
         </div>
@@ -580,7 +594,7 @@
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.2.28 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.2.43 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">

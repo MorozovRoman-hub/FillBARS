@@ -1,6 +1,6 @@
 (function(scope) {
     'use strict';
-    const VERSION='5.2.28', CARD='Persmedcard/persmedcard_edit';
+    const VERSION='5.2.43', CARD='Persmedcard/persmedcard_edit';
     const normalize=value=>String(value??'').replace(/\s+/g,' ').trim();
     function pageOf(card,win) {
         const direct=card?.form?.page||card?.jsParent?.page||card?.DForm?.page;

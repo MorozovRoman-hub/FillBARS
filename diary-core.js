@@ -170,7 +170,7 @@
         }
         const autoPick = raw.autoPick === true;
         if (autoPick && validateVitals(defaults).length) throw new Error('Для автоматического подбора задайте числовые исходные показатели.');
-        return { defaults: Object.fromEntries(vitalFields.map(key => [key, defaults[key]])), hourStep, autoPick, spread: Object.fromEntries(Object.keys(SPREAD_LIMITS).map(key => [key, spread[key]])) };
+        return { defaults: Object.fromEntries(vitalFields.map(key => [key, defaults[key]])), hourStep, autoPick, verifyAfterSave: raw.verifyAfterSave === true, spread: Object.fromEntries(Object.keys(SPREAD_LIMITS).map(key => [key, spread[key]])) };
     }
     function normalSample(random = Math.random) {
         const u = Math.max(Number.EPSILON, random());
@@ -224,19 +224,52 @@
         }) };
     }
     function emptyLibrary() { return { type: 'fillbars-card-templates', version: VERSION, profiles: [] }; }
+    function renalColicHistoryTemplate() {
+        const entry = (title, days, diary) => ({ id: uid(), title, offsetMinutes: days * 1440, diary, examination: '', treatment: '' });
+        const common = 'Состояние пациента удовлетворительное.\nЖалобы: нет.\nКожные покровы обычной окраски.\nДыхание в лёгких везикулярное, хрипов нет.\nТоны сердца ритмичные, приглушённые.\nЖивот при пальпации мягкий, безболезненный. Перитонеальных симптомов нет. ';
+        const conclusion = '\nФизиологические отправления в норме. Динамика положительная.';
+        const recovered = common + 'Симптом поколачивания отрицательный с двух сторон.' + conclusion;
+        return { id: 'renal-colic-history-v1', name: 'Почечная колика', side: 'left', entries: [
+            entry('Дневник — боли в пояснице', 0, 'Состояние пациента удовлетворительное.\nЖалобы: умеренные тянущие боли в пояснице слева.\nКожные покровы обычной окраски.\nДыхание в лёгких везикулярное, хрипов нет.\nТоны сердца ритмичные, приглушённые.\nЖивот при пальпации мягкий, болезненный в проекции левой почки. Перитонеальных симптомов нет. Симптом поколачивания слабо положительный слева.' + conclusion + '\n\nОбоснование клинического диагноза: диагноз установлен на основании жалоб на боли в пояснице слева, анамнеза (острое начало заболевания), объективного статуса, динамического наблюдения и рентгенологических данных.\nДиагноз: мочекаменная болезнь. Камень левой почки. Почечная колика слева.'),
+            entry('Дневник — жалоб нет', 1, common + 'Симптом поколачивания слабо положительный слева.' + conclusion),
+            entry('Обход заведующего', 2, recovered),
+            entry('Контрольный дневник', 5, recovered),
+            entry('Повторный контроль', 7, recovered),
+            entry('Дневник в динамике', 9, recovered)
+        ] };
+    }
+    const sidePairs = [['слева', 'справа'], ['левее', 'правее']];
+    for (const ending of ['ый', 'ая', 'ое', 'ые', 'ого', 'ой', 'ому', 'ую', 'ым', 'ом', 'ых', 'ыми']) sidePairs.push(['лев' + ending, 'прав' + ending]);
+    for (const ending of ['ий', 'яя', 'ее', 'ие', 'его', 'ей', 'ему', 'юю', 'им', 'ем', 'их', 'ими']) sidePairs.push(['левосторонн' + ending, 'правосторонн' + ending]);
+    const sideWords = new Map(sidePairs.flatMap(([left, right]) => [[left, right], [right, left]]));
+    const sidePattern = new RegExp('(?<![\\p{L}\\p{M}\\p{N}_])(?:' + [...sideWords.keys()].sort((a,b) => b.length - a.length).join('|') + ')(?![\\p{L}\\p{M}\\p{N}_])', 'giu');
+    function switchSideTexts(record) {
+        const result = clone(record);
+        // Swap both sides in one pass, preserving contralateral descriptions and case.
+        for (const field of [...textFields, 'title']) {
+            if (typeof result[field] !== 'string') continue;
+            result[field] = result[field].replace(sidePattern, source => matchCase(source, sideWords.get(source.toLowerCase())));
+            if (result[field].length > (field === 'title' ? 120 : TEXT_LIMIT)) throw new Error('После смены стороны текст превышает допустимую длину. Сократите текст.');
+        }
+        return result;
+    }
+    function changeHistorySide(template, side) {
+        if (!['left', 'right'].includes(template?.side) || !['left', 'right'].includes(side)) throw new Error('Выберите сторону: слева или справа.');
+        return { ...clone(template), side, entries: template.entries.map(entry => side === template.side ? clone(entry) : switchSideTexts(entry)) };
+    }
     function starterHistoryLibrary() {
         const entry = (title, offsetMinutes, diary, examination = '', treatment = '') => ({ id: uid(), title, offsetMinutes, diary, examination, treatment });
         // Clinical wording is from the supplied four-diary sample. Patient identity,
         // observation dates and measured vitals must never become reusable defaults.
         const examinationText = 'Состояние пациента удовлетворительное . Жалобы: нет Кожные покровы обычной окраски. тургор кожи обычный. Дыхание в лёгких: везикулярное, хрипов нет. Тоны сердца громкие, ритмичные, ясные. Живот при пальпации: мягкий, безболезненный. Симптомов раздражения брюшины нет. Стул без крови. Мочеиспускание свободное.\nДанных за рецидив кровотечения нет.';
-        return { type: 'fillbars-card-history-templates', version: 1, templates: [{
+        return { type: 'fillbars-card-history-templates', version: 1, builtinRevision: 1, templates: [{
             id: uid(), name: 'ЖКК на колоноскопию', entries: [
                 entry('Первичный осмотр', 0, examinationText + ' Готовиться на колоноскопию.', '-колоноскопия'),
                 entry('После колоноскопии', 985, examinationText + ' На колоноскопии хронический внутренний геморрой 2 ст.', '-', 'гемостатическая терапия'),
                 entry('Контрольный осмотр', 2425, examinationText, '-'),
                 entry('Повторный контроль', 3865, examinationText, '-')
             ]
-        }] };
+        }, renalColicHistoryTemplate()] };
     }
     function upgradeStarterHistoryLibrary(raw) {
         const library = cleanHistoryLibrary(raw);
@@ -252,22 +285,33 @@
         for (const template of library.templates) {
             if (template.name !== replacement.name || template.entries.length !== legacy.length) continue;
             const untouched = template.entries.every((item, index) => [item.title, item.offsetMinutes, ...textFields.map(field => item[field])].every((value, fieldIndex) => value === legacy[index][fieldIndex]));
-            if (untouched) template.entries = replacement.entries.map((item, index) => ({ ...item, id: template.entries[index].id }));
+            if (untouched) template.entries = replacement.entries.map((item, index) => ({ ...item, vitals: { ...template.entries[index].vitals }, id: template.entries[index].id }));
+        }
+        if (library.builtinRevision < 1 && library.templates.length < 50) {
+            if (!library.templates.some(template => template.id === 'renal-colic-history-v1' || template.name === 'Почечная колика')) library.templates.push(renalColicHistoryTemplate());
+            library.builtinRevision = 1;
         }
         return library;
     }
     function cleanHistoryLibrary(raw) {
         if (!raw || raw.type !== 'fillbars-card-history-templates' || raw.version !== 1 || !Array.isArray(raw.templates) || raw.templates.length > 50) throw new Error('Неверная библиотека шаблонов истории.');
         const ids = new Set();
-        return { type: raw.type, version: 1, templates: raw.templates.map(template => {
+        return { type: raw.type, version: 1, builtinRevision: raw.builtinRevision === 1 ? 1 : 0, templates: raw.templates.map(template => {
             if (!template || typeof template.name !== 'string' || !template.name.trim() || template.name.length > 120 || !Array.isArray(template.entries) || !template.entries.length || template.entries.length > MAX_ROWS) throw new Error('Укажите название и от 1 до 48 дневников шаблона истории.');
             const id = typeof template.id === 'string' && template.id.length < 100 && !ids.has(template.id) ? template.id : uid(); ids.add(id);
             const entryIds = new Set();
-            return { id, name: template.name.trim(), entries: template.entries.map((entry, index) => {
+            if (template.side !== undefined && !['left', 'right'].includes(template.side)) throw new Error('Неверная сторона шаблона истории.');
+            return { id, name: template.name.trim(), ...(template.side ? { side: template.side } : {}), entries: template.entries.map((entry, index) => {
                 if (!entry || typeof entry.title !== 'string' || entry.title.length > 120 || !Number.isInteger(entry.offsetMinutes) || entry.offsetMinutes < 0 || entry.offsetMinutes > 60 * 24 * 60 || textFields.some(field => typeof entry[field] !== 'string' || entry[field].length > TEXT_LIMIT)) throw new Error('Проверьте тексты и смещения дневников истории (от 0 до 60 суток).');
                 if (index && entry.offsetMinutes <= template.entries[index - 1].offsetMinutes) throw new Error('Дневники шаблона истории должны идти по возрастанию даты и времени.');
                 const entryId = typeof entry.id === 'string' && entry.id.length < 100 && !entryIds.has(entry.id) ? entry.id : uid(); entryIds.add(entryId);
-                return { id: entryId, title: entry.title.trim(), offsetMinutes: entry.offsetMinutes, diary: entry.diary, examination: entry.examination, treatment: entry.treatment };
+                if (entry.vitals !== undefined && (!entry.vitals || typeof entry.vitals !== 'object' || Array.isArray(entry.vitals))) throw new Error('Проверьте показатели дневника истории.');
+                const vitals = Object.fromEntries(vitalFields.map(field => {
+                    const value = entry.vitals?.[field] ?? '';
+                    if (typeof value !== 'string' || value.length > 67) throw new Error('Показатели дневника истории: не более 67 символов в каждом поле.');
+                    return [field, value];
+                }));
+                return { id: entryId, title: entry.title.trim(), offsetMinutes: entry.offsetMinutes, vitals, diary: entry.diary, examination: entry.examination, treatment: entry.treatment };
             }) };
         }) };
     }
@@ -278,13 +322,42 @@
         const first = new Date(year, month - 1, day, hour, minute);
         return checked.entries.map(entry => {
             const stamp = dateParts(new Date(first.getTime() + entry.offsetMinutes * 60000));
-            return { ...createRow({ date: stamp.date, time: stamp.time }), vitals: { temperature: '', pressure: '', pulse: '', respiration: '' }, diary: entry.diary, examination: entry.examination, treatment: entry.treatment, reviewed: false, status: 'draft' };
+            return { ...createRow({ date: stamp.date, time: stamp.time }), vitals: { ...entry.vitals }, diary: entry.diary, examination: entry.examination, treatment: entry.treatment, reviewed: false, status: 'draft' };
         });
     }
     function fields(row) {
         return { VISIT_DATE: barsDate(row.date), VISIT_TIME: row.time, TEMPERATURE: String(row.vitals?.temperature ?? ''), AD: String(row.vitals?.pressure ?? ''), THSS: String(row.vitals?.pulse ?? ''), THD: String(row.vitals?.respiration ?? ''), S_DNEVNIK: row.diary, STAC_PLAN: row.examination, RECOMEND_CONS: row.treatment };
     }
-    const api = { VERSION, TEXT_LIMIT, MAX_ROWS, DEFAULTS, DEFAULT_SPREAD, textFields, vitalFields, uid, clone, norm, dateParts, validDate, validTime, barsDate, pressure, number, validateVitals, validateRow, validateQueue, inferGender, renderVariant, chooseVariant, createRow, sampleVitals, cleanSettings, cleanLibrary, emptyLibrary, starterHistoryLibrary, upgradeStarterHistoryLibrary, cleanHistoryLibrary, instantiateHistoryTemplate, fields };
+    function comparisonSnapshot(row) {
+        return { ...Object.fromEntries(textFields.map(field => [field, String(row?.[field] || '')])), vitals: Object.fromEntries(vitalFields.map(field => [field, String(row?.vitals?.[field] || '')])) };
+    }
+    function diffText(before, after) {
+        const tokenize = text => String(text || '').match(/\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) || [];
+        const a = tokenize(before), b = tokenize(after), result = [];
+        const push = (type, text) => { if (!text) return; const last = result.at(-1); if (last?.type === type) last.text += text; else result.push({ type, text }); };
+        // Bound work for pathological 4000-character edits. The fallback marks the
+        // whole middle as changed, never inventing an inherited segment.
+        if (a.length * b.length > 250000) {
+            let start = 0, end = 0;
+            while (start < a.length && start < b.length && a[start] === b[start]) start++;
+            while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+            push('equal', a.slice(0, start).join(''));
+            push('removed', a.slice(start, a.length - end).join(''));
+            push('added', b.slice(start, b.length - end).join(''));
+            push('equal', a.slice(a.length - end).join(''));
+            return result;
+        }
+        const width = b.length + 1, table = new Uint16Array((a.length + 1) * width);
+        for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) table[i * width + j] = a[i] === b[j] ? 1 + table[(i + 1) * width + j + 1] : Math.max(table[(i + 1) * width + j], table[i * width + j + 1]);
+        let i = 0, j = 0;
+        while (i < a.length || j < b.length) {
+            if (i < a.length && j < b.length && a[i] === b[j]) { push('equal', a[i]); i++; j++; }
+            else if (i < a.length && (j === b.length || table[(i + 1) * width + j] >= table[i * width + j + 1])) push('removed', a[i++]);
+            else push('added', b[j++]);
+        }
+        return result;
+    }
+    const api = { VERSION, TEXT_LIMIT, MAX_ROWS, DEFAULTS, DEFAULT_SPREAD, textFields, vitalFields, uid, clone, norm, dateParts, validDate, validTime, barsDate, pressure, number, validateVitals, validateRow, validateQueue, inferGender, renderVariant, chooseVariant, createRow, sampleVitals, cleanSettings, cleanLibrary, emptyLibrary, starterHistoryLibrary, upgradeStarterHistoryLibrary, cleanHistoryLibrary, instantiateHistoryTemplate, renalColicHistoryTemplate, switchSideTexts, changeHistorySide, comparisonSnapshot, diffText, fields };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.FillBARSCardCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);
