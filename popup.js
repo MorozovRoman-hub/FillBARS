@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.62';
+const EXTENSION_VERSION = '5.2.63';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -1928,11 +1928,12 @@ async function initPatientMetricsControls() {
         enabled = saved === true;
         if (!enabled) {
             const frames = await chrome.scripting.executeScript({ target, func: () => !!document.querySelector(
-                '.healing_emp [cmptype="Grid"][name="gridHealingDoctor"], .pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"]'
+                '.healing_emp [cmptype="Grid"]:is([name="gridHealingDoctor"], [name="gridDutyDoctor"]), '
+                + '.pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"]'
             ) });
             if (!frames.some(frame => frame.result)) return;
         }
-        const hint = 'Под фамилиями в списке «Лечащий врач (NEW)» появятся СКФ, гемоглобин, глюкоза, ИМТ, амилаза, общий билирубин и лейкоциты.';
+        const hint = 'На вкладках «Лечащий врач» и «Дежурный врач» под фамилиями появятся СКФ, гемоглобин, глюкоза, ИМТ, амилаза, общий билирубин и лейкоциты.';
         checkbox.checked = enabled;
         checkbox.disabled = false;
         status.textContent = hint;

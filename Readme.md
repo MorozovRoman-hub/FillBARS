@@ -6,7 +6,7 @@
 
 **Назначения, дневники и медицинские бланки из открытой карточки пациента.**
 
-[![Исходники 5.2.62](docs/assets/readme/version.svg)](manifest.json)
+[![Исходники 5.2.63](docs/assets/readme/version.svg)](manifest.json)
 [![Manifest V3](docs/assets/readme/manifest.svg)](manifest.json)
 [![Лицензия MIT](docs/assets/readme/license.svg)](LICENSE)
 
@@ -93,7 +93,7 @@ FillBARS помогает сократить повторный ввод в по
 <details>
 <summary><strong>Установка из исходников и проверки для разработчика</strong></summary>
 
-Для использования расширения Node.js и сборка не требуются. Версия исходников — **5.2.62**. Версия в магазине может отличаться, пока обновление проходит модерацию.
+Для использования расширения Node.js и сборка не требуются. Версия исходников — **5.2.63**. Версия в магазине может отличаться, пока обновление проходит модерацию.
 
 Скачать исходники можно [ZIP-архивом](https://github.com/MorozovRoman-hub/FillBARS/archive/refs/heads/master.zip) или через Git:
 

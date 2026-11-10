@@ -2,9 +2,9 @@
     'use strict';
     if (globalThis.FillBARSPatientMetrics) return;
 
-    const d3Grid = '.healing_emp [cmptype="Grid"][name="gridHealingDoctor"]';
+    const d3Grids = '.healing_emp [cmptype="Grid"]:is([name="gridHealingDoctor"], [name="gridDutyDoctor"])';
     const legacyGrid = '.pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"]';
-    const grids = `${d3Grid}, ${legacyGrid}`;
+    const grids = `${d3Grids}, ${legacyGrid}`;
     const badgeSelector = '[data-fillbars-patient-metrics]';
     const decorations = `${badgeSelector}, [data-fillbars-cec]`;
     const repeaterId = /(?:^|\s)(?:rep|repeater)keyvalue(\d+)(?=\s|$)/;
@@ -23,7 +23,7 @@
     const visible = element => element.getClientRects().length && getComputedStyle(element).visibility === 'visible';
 
     function patient(row, grid) {
-        const d3 = grid.matches(d3Grid);
+        const d3 = grid.matches(d3Grids);
         if (!visible(row) || (d3 && row.getAttribute('isclone') !== '1')) return null;
         const data = row.clone?.data;
         const rowId = id(row.getAttribute('keyvalue') || row.getAttribute('repkeyvalue')
@@ -49,8 +49,10 @@
         const result = [];
         for (const grid of document.querySelectorAll(grids)) {
             if (!visible(grid)) continue;
-            if (grid.matches(legacyGrid) && grid.closest('.pat_in_dep_healing_emp')
-                .querySelector('input[type="radio"][name="N_TYPE"]:checked')?.value !== '0') continue;
+            if (grid.matches(legacyGrid)) {
+                const mode = grid.closest('.pat_in_dep_healing_emp').querySelector('input[type="radio"][name="N_TYPE"]:checked')?.value;
+                if (mode !== '0' && mode !== '1') continue;
+            }
             for (const row of grid.querySelectorAll('tr[cmptype="GridRow"]')) {
                 const entry = patient(row, grid);
                 if (entry) result.push(entry);

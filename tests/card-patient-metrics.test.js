@@ -7,9 +7,9 @@ const test = require('node:test');
 const { setImmediate: tick } = require('node:timers/promises');
 const { JSDOM } = require('jsdom');
 
-function setup(t, responder) {
+function setup(t, responder, gridName = 'gridHealingDoctor') {
     const { window } = new JSDOM(`<div class="healing_emp">
-        <div cmptype="Grid" name="gridHealingDoctor"><table><tbody>
+        <div cmptype="Grid" name="${gridName}"><table><tbody>
             <tr class="repkeyvalue11" cmptype="GridRow" isclone="1"><td><a name="PAT_LINK" keyvalue="41">Тест</a></td></tr>
         </tbody></table></div></div>`, { url: 'https://bars.example/mis/index.php', pretendToBeVisual: true, runScripts: 'outside-only' });
     const row = window.document.querySelector('tr');
@@ -52,53 +52,55 @@ function labRow({ caseId = '31', dep = '21', hb = '112' } = {}) {
 const constitution = `<row><ANTHROP_NAME>Масса тела</ANTHROP_NAME><A_VALUE>90</A_VALUE><MEAS>кг</MEAS></row>
     <row><ANTHROP_NAME>Рост</ANTHROP_NAME><A_VALUE>170</A_VALUE><MEAS>см</MEAS></row>`;
 
-test('renders blood markers without extra requests, preserving BARS abnormal flags and units', async t => {
-    const extraLabs = `<row><DISEASECASE>31</DISEASECASE><HH_DEP>21</HH_DEP><BIO>Моча</BIO>
-        <RES><![CDATA[Лейкоциты: 90 10^9/л; Амилаза: 900 Ед/л]]></RES></row>
-        <row><DISEASECASE>31</DISEASECASE><HH_DEP>21</HH_DEP><BIO>Сыворотка крови</BIO><SVISIT_DATE>10.11.2026</SVISIT_DATE>
-        <RES><![CDATA[Амилаза панкреатическая: 300 Ед/л; <span style="color:red;">Альфа-амилаза: 128 Ед/л</span>;
-        Билирубин прямой: 5 мкмоль/л; Билирубин (общий): 17,2 мкмоль/л]]></RES></row>
-        <row><DISEASECASE>31</DISEASECASE><HH_DEP>21</HH_DEP><SERVICE_NAME>ОАК</SERVICE_NAME>
-        <RES><![CDATA[Лейкоциты: 99; WBC (лейкоциты): 12,6 10^9/л]]></RES></row>`;
-    const { update, requests, badge } = setup(t, params => ({
-        DS_ANALYSES: labRow() + extraLabs, DS_CONSITUTION_SPS: constitution, pmc: '<row><SEX>Мужской</SEX><AGE>62</AGE></row>'
-    })[params.DataSet]);
-    update(false);
-    assert.equal(requests.length, 0);
-    update(true);
-    await tick();
-    const original = badge();
-    assert.ok(original);
-    const [gfr, hb, glucose, bmi, amylase, bilirubin, leukocytes] = original.children;
-    assert.match(gfr.textContent, /^СКФ \d/);
-    assert.equal(hb.textContent, 'Hb 112');
-    assert.equal(hb.style.color, 'rgb(153, 27, 27)');
-    assert.match(hb.title, /10\.11\.2026/);
-    assert.equal(glucose.textContent, 'Глюкоза 6,5');
-    assert.equal(bmi.textContent, 'ИМТ 31,14');
-    assert.equal(amylase.textContent, 'Амилаза 128');
-    assert.equal(amylase.style.color, 'rgb(153, 27, 27)');
-    assert.match(amylase.title, /Ед\/л.*10\.11\.2026/);
-    assert.equal(bilirubin.textContent, 'Билирубин общ. 17,2');
-    assert.equal(leukocytes.textContent, 'Лейкоциты 12,6');
-    assert.match(leukocytes.title, /10\^9\/л/);
-    assert.deepEqual(requests.filter(({ params }) => params.DataSet).map(({ path, params }) =>
-        [path, params.DataSet, params.DIS_g0, params.HH_DEP_ID_g1, params.AGENT, params.pat]), [
-        ['/mis/getdata.php', 'DS_ANALYSES', '31', '21', undefined, undefined],
-        ['/mis/getdata.php', 'DS_CONSITUTION_SPS', undefined, undefined, '51', undefined],
-        ['/mis/getdata.php', 'pmc', undefined, undefined, undefined, '41']
-    ]);
-    update(true);
-    assert.equal(badge(), original);
-    assert.equal(requests.length, 6);
-    assert.equal(requests[1].query.FormCache, 'native-form-cache');
-    assert.equal(requests[1].params.mode, 'Range');
-    assert.equal(requests[0].query.session_cache, 'runtime-session');
-    assert.equal(requests[0].query.cache, 'runtime-cache');
-    assert.match(requests[1].headers.Method, /^POST getdata\.php\?.* HTTP\/1\.1$/);
-    update(false);
-    assert.equal(badge(), null);
-});
+for (const gridName of ['gridHealingDoctor', 'gridDutyDoctor']) {
+    test(`${gridName} renders blood markers without extra requests, preserving BARS abnormal flags and units`, async t => {
+        const extraLabs = `<row><DISEASECASE>31</DISEASECASE><HH_DEP>21</HH_DEP><BIO>Моча</BIO>
+            <RES><![CDATA[Лейкоциты: 90 10^9/л; Амилаза: 900 Ед/л]]></RES></row>
+            <row><DISEASECASE>31</DISEASECASE><HH_DEP>21</HH_DEP><BIO>Сыворотка крови</BIO><SVISIT_DATE>10.11.2026</SVISIT_DATE>
+            <RES><![CDATA[Амилаза панкреатическая: 300 Ед/л; <span style="color:red;">Альфа-амилаза: 128 Ед/л</span>;
+            Билирубин прямой: 5 мкмоль/л; Билирубин (общий): 17,2 мкмоль/л]]></RES></row>
+            <row><DISEASECASE>31</DISEASECASE><HH_DEP>21</HH_DEP><SERVICE_NAME>ОАК</SERVICE_NAME>
+            <RES><![CDATA[Лейкоциты: 99; WBC (лейкоциты): 12,6 10^9/л]]></RES></row>`;
+        const { update, requests, badge } = setup(t, params => ({
+            DS_ANALYSES: labRow() + extraLabs, DS_CONSITUTION_SPS: constitution, pmc: '<row><SEX>Мужской</SEX><AGE>62</AGE></row>'
+        })[params.DataSet], gridName);
+        update(false);
+        assert.equal(requests.length, 0);
+        update(true);
+        await tick();
+        const original = badge();
+        assert.ok(original);
+        const [gfr, hb, glucose, bmi, amylase, bilirubin, leukocytes] = original.children;
+        assert.match(gfr.textContent, /^СКФ \d/);
+        assert.equal(hb.textContent, 'Hb 112');
+        assert.equal(hb.style.color, 'rgb(153, 27, 27)');
+        assert.match(hb.title, /10\.11\.2026/);
+        assert.equal(glucose.textContent, 'Глюкоза 6,5');
+        assert.equal(bmi.textContent, 'ИМТ 31,14');
+        assert.equal(amylase.textContent, 'Амилаза 128');
+        assert.equal(amylase.style.color, 'rgb(153, 27, 27)');
+        assert.match(amylase.title, /Ед\/л.*10\.11\.2026/);
+        assert.equal(bilirubin.textContent, 'Билирубин общ. 17,2');
+        assert.equal(leukocytes.textContent, 'Лейкоциты 12,6');
+        assert.match(leukocytes.title, /10\^9\/л/);
+        assert.deepEqual(requests.filter(({ params }) => params.DataSet).map(({ path, params }) =>
+            [path, params.DataSet, params.DIS_g0, params.HH_DEP_ID_g1, params.AGENT, params.pat]), [
+            ['/mis/getdata.php', 'DS_ANALYSES', '31', '21', undefined, undefined],
+            ['/mis/getdata.php', 'DS_CONSITUTION_SPS', undefined, undefined, '51', undefined],
+            ['/mis/getdata.php', 'pmc', undefined, undefined, undefined, '41']
+        ]);
+        update(true);
+        assert.equal(badge(), original);
+        assert.equal(requests.length, 6);
+        assert.equal(requests[1].query.FormCache, 'native-form-cache');
+        assert.equal(requests[1].params.mode, 'Range');
+        assert.equal(requests[0].query.session_cache, 'runtime-session');
+        assert.equal(requests[0].query.cache, 'runtime-cache');
+        assert.match(requests[1].headers.Method, /^POST getdata\.php\?.* HTTP\/1\.1$/);
+        update(false);
+        assert.equal(badge(), null);
+    });
+}
 
 test('discards an in-flight result after BARS recycles a row and ignores foreign admission data', async t => {
     let finish;
