@@ -16,6 +16,7 @@ drug-catalog-zhvnlp-2025.json fill-runner.js fillbars-config.json office-export.
 popup.html popup.js print.css print.html print.js transfusion.css transfusion.html transfusion.js
 medical-forms.html medical-forms.css medical-forms.js medical-templates.js histology-template.js histology-print-layout.js commission-templates.js commission-print-layouts.js skt-template.js consent-templates.js extra-templates.js followup-templates.js medical-print-layouts.js operation-catalog.js patient-details-adapter.js LICENSE'''.split()
 RUNTIME_FILES += ['kidney-function.js', 'kidney-bars-adapter.js', 'lab-markers.js', 'lab-trends.js', 'lab-trends.css']
+RUNTIME_FILES += ['cec-reminders.js', 'cec-reminders.css']
 
 
 class References(HTMLParser):

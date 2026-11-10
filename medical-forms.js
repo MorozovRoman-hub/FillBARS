@@ -1,4 +1,4 @@
-(function (scope) {
+(async function (scope) {
     'use strict';
     const titles = { palliative: 'Заключение ВК для паллиативной помощи', cec: 'КЭК — представление и заключение', histology: 'Гистология — направление 014/у и протокол 014-1/у', military: 'Выписка для военнослужащих', commission: 'Заключение врачебной комиссии', referral: 'Направление — форма 057/у-04', oncology: 'Извещение о впервые выявленном новообразовании', tmk: 'Заявка на телемедицинскую консультацию', skt: 'Направление на СКТ', operationConsent: 'Согласие на операцию', anesthesiaConsent: 'Согласие на анестезию', colonoscopyConsent:'Согласие на колоноскопию', bronchoscopyConsent:'Согласие на бронхоскопию', gastroscopyConsent:'Согласие на гастроскопию', thrombolysisConsent:'Согласие на тромболизис', operationProtocol:'Протокол операции', workInjury315:'Медицинское заключение 315-1/у', workInjury316:'Медицинское заключение 316-1/у', epidemicInvestigation:'Карта эпидемиологического расследования', centralCatheter:'Протокол катетеризации центральной вены' };
     const oncologyChoiceSections = [
@@ -58,9 +58,21 @@
     if (typeof module !== 'undefined') module.exports=api;
     if (!scope.document?.getElementById('fields')) return;
     const params = new URLSearchParams(location.search), key=params.get('payload');
+    const kind=params.get('template');
     let payload={};
-    try { if(key?.startsWith('fillbars-medical-')) {payload=JSON.parse(localStorage.getItem(key)||'{}');localStorage.removeItem(key);if(Date.now()-Date.parse(payload.generatedAt)>600000)payload={};} } catch (_) { /* Blank form remains available. */ }
-    const kind=params.get('template'), template=scope.__FillBARSMedicalTemplates__[kind];
+    const fromCECPanel = kind === 'cec' && /^fillbars-cec-print-[0-9a-f-]{36}$/.test(key || '');
+    try {
+        if (fromCECPanel) {
+            const saved = (await chrome.storage.session.get(key))[key];
+            await chrome.storage.session.remove(key);
+            if (saved && Date.now() - saved.generatedAt <= 600000) payload = saved;
+        } else if (key?.startsWith('fillbars-medical-')) {
+            payload = JSON.parse(localStorage.getItem(key) || '{}');
+            localStorage.removeItem(key);
+            if (Date.now() - Date.parse(payload.generatedAt) > 600000) payload = {};
+        }
+    } catch (_) { /* Blank form remains available. */ }
+    const template=scope.__FillBARSMedicalTemplates__[kind];
     if (!template) { document.getElementById('notice').textContent='Неизвестный шаблон.'; document.getElementById('download').disabled=true;return; }
     const patient=payload.patient||{}, now=new Date();
     const values={...patient, documentDate:dateText(patient.appointmentDate||`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`),birthDate:dateText(patient.birthDate),birthYear:String(patient.birthDate||'').match(/\b(?:19|20)\d{2}\b/)?.[0]||'',address:patient.registeredAddress||'',startDate:dateText(patient.startDate),endDate:dateText(patient.endDate),doctorContacts:[patient.doctorPhone,patient.doctorEmail].filter(Boolean).join(', ')};
@@ -80,6 +92,7 @@
     if(kind.endsWith('Consent')) document.getElementById('notice').textContent=consentNotice;
     if(kind==='palliative') document.getElementById('notice').textContent='В решение ВК подставлен стандартный текст о признании пациента нуждающимся в паллиативной медицинской помощи. Его можно отредактировать. Заполните осмотр, рекомендации и состав комиссии, проверьте бланк перед печатью и подписанием.';
     if(kind==='cec') document.getElementById('notice').textContent='КЭК на одном книжном листе А4: сверху представление, снизу заключение, по одному экземпляру. Решения о нетрудоспособности, МСЭ, прогнозе и цели направления заполняются вручную.';
+    if (fromCECPanel && !payload.patient) document.getElementById('notice').textContent = 'Данные пациента не загрузились. Откройте бланк из плашки КЭК заново или заполните поля вручную.';
     if(kind==='histology') document.getElementById('notice').textContent='В образце две страницы: направление 014/у и протокол 014-1/у. Проверьте сведения пациента и данные о материале. Протокол исследования заполняет лаборатория; даты забора, фиксация и заключение автоматически не определяются.';
     if(kind==='operationProtocol') document.getElementById('notice').textContent='Черновик протокола: описание операции необходимо сверить с фактически выполненным вмешательством, а предзаполненную запись о совпадении счёта инструментов и салфеток — с фактическим подсчётом до печати. Неподтверждённые сведения исправьте или удалите.';
     if(kind==='workInjury315'||kind==='workInjury316') document.getElementById('notice').textContent='Заключение по форме 315-1/у или 316-1/у: степень тяжести, окончательный диагноз и подпись не определяются автоматически. Проверьте данные и заполните их после медицинской оценки.';

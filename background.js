@@ -416,6 +416,14 @@ async function handleDiagnosticMessage(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === 'fillbars-cec-print') {
+        if (sender.id !== chrome.runtime.id || !sender.tab?.id) return false;
+        openCECPrintTemplate(message.patient).then(
+            () => sendResponse({ opened: true }),
+            () => sendResponse({ opened: false })
+        );
+        return true;
+    }
     if (!message || message.namespace !== DIAGNOSTIC_MESSAGE_NAMESPACE) {
         return false;
     }
@@ -429,6 +437,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     );
     return true;
 });
+
+async function openCECPrintTemplate(patient) {
+    const fullName = typeof patient?.fullName === 'string' ? patient.fullName.trim() : '';
+    if (!fullName || fullName.length > 200) throw new Error('cec_missing_patient');
+    const birthDate = /^\d{4}-\d{2}-\d{2}$/.test(patient.birthDate || '') ? patient.birthDate : '';
+    const key = `fillbars-cec-print-${crypto.randomUUID()}`;
+    const url = chrome.runtime.getURL(`medical-forms.html?template=cec&payload=${key}`);
+    await chrome.storage.session.set({ [key]: { patient: { fullName, birthDate }, generatedAt: Date.now() } });
+    try {
+        await chrome.tabs.create({ url });
+    } catch (error) {
+        await chrome.storage.session.remove(key);
+        throw error;
+    }
+}
 
 chrome.runtime.onStartup.addListener(() => {
     diagnosticOperationQueue = diagnosticOperationQueue

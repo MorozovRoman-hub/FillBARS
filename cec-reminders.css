@@ -1,0 +1,83 @@
+[data-fillbars-cec="panel"] {
+    box-sizing: border-box;
+    padding: 5px 9px;
+    margin-bottom: 4px;
+    border: 1px solid #9daebb;
+    border-radius: 4px;
+    background: #f4f8fb;
+    color: #1d3544;
+    font: 12px/1.4 system-ui, sans-serif;
+}
+
+[data-fillbars-cec="panel"] summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+[data-fillbars-cec="panel"] .fillbars-cec-count-alert {
+    color: #b42318;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+[data-fillbars-cec="panel"] ul {
+    max-height: 140px;
+    overflow: auto;
+    margin: 4px 0 0;
+    padding-left: 22px;
+}
+
+[data-fillbars-cec="panel"] button {
+    padding: 1px 4px;
+    border: 0;
+    background: transparent;
+    color: #174e78;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+[data-fillbars-cec="panel"] .fillbars-cec-actions button {
+    margin: 3px 6px 2px 0;
+    padding: 3px 8px;
+    border: 1px solid #7894ab;
+    border-radius: 4px;
+    background: #fff;
+    color: #174e78;
+    font: 600 12px/1.4 system-ui, sans-serif;
+    text-decoration: none;
+}
+
+[data-fillbars-cec="panel"] .fillbars-cec-actions button:hover:not(:disabled) {
+    background: #e2edf6;
+}
+
+[data-fillbars-cec="panel"] .fillbars-cec-actions button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+[data-fillbars-cec="panel"] li {
+    margin-bottom: 4px;
+}
+
+[data-fillbars-cec="panel"] input[type="date"] {
+    font: inherit;
+}
+
+a.fillbars-cec-history-target {
+    outline: 2px solid #174e78;
+    outline-offset: 2px;
+    background-color: #fff3bc;
+}
+
+span[data-fillbars-cec] {
+    display: inline-block;
+    padding: 1px 4px;
+    margin: 1px 4px;
+    border-radius: 4px;
+    font: 600 11px/1.4 system-ui, sans-serif;
+}
+
+[data-fillbars-cec="13"] { background: #fff3bc; color: #573d00; }
+[data-fillbars-cec="14"] { background: #ffd8ab; color: #632d00; }
+[data-fillbars-cec="15"] { background: #ffd3d3; color: #821924; }

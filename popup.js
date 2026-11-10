@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.43';
+const EXTENSION_VERSION = '5.2.56';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -1818,6 +1818,96 @@ async function renderJournalPanel() {
 
 function closeJournalPanel() {
     document.getElementById('journalPanel')?.classList.add('hidden');
+}
+
+function initCECReminderControls() {
+    const check = document.getElementById('cecCheck');
+    const enable = document.getElementById('cecEnable');
+    const status = document.getElementById('cecStatus');
+    let site;
+
+    check.addEventListener('click', async () => {
+        document.getElementById('cecPanel').hidden = false;
+        enable.hidden = true;
+        check.disabled = true;
+        status.textContent = 'Проверяем текущую страницу списка пациентов…';
+        try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id || !/^https?:\/\//.test(tab.url || '')) {
+                status.textContent = 'В текущем окне браузера нет активной вкладки сайта БАРС.';
+                return;
+            }
+            const url = new URL(tab.url);
+            const match = `${url.protocol}//${url.hostname}/*`;
+            const id = `cec-${Array.from(new TextEncoder().encode(match), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+            const frames = await chrome.scripting.executeScript({
+                target: { tabId: tab.id, allFrames: true },
+                func: () => !!document.querySelector(
+                    '.healing_emp [cmptype="Grid"][name="gridHealingDoctor"], '
+                    + '.pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"]'
+                )
+            });
+            const frameIds = frames.filter(({ result }) => result).map(({ frameId }) => frameId);
+            if (!frameIds.length) {
+                status.textContent = 'Список пациентов не распознан. Откройте «Лечащий врач (NEW)» в БАРС.';
+                return;
+            }
+            const target = { tabId: tab.id, frameIds };
+            await chrome.scripting.insertCSS({ target, files: ['cec-reminders.css'] });
+            await chrome.scripting.executeScript({ target, files: ['cec-reminders.js'] });
+            const results = await chrome.scripting.executeScript({
+                target, func: () => globalThis.FillBARSCECReminders?.scan() || []
+            });
+            const lists = results.flatMap(({ result }) => result || []);
+            if (lists.length !== 1) {
+                status.textContent = lists.length
+                    ? 'Оставьте открытым один список «Лечащий врач (NEW)».'
+                    : 'Откройте «Лечащий врач (NEW)» и выберите режим «Лечащий врач».';
+                return;
+            }
+            const { checked, unknown, soon, next, later, storageUnavailable } = lists[0];
+            if (storageUnavailable) {
+                status.textContent = 'Отметки КЭК недоступны. Обновите страницу БАРС и повторите проверку.';
+                return;
+            }
+            status.textContent = `Текущая страница · проверено ${checked} · 13-й день: ${soon} · 14-й: ${next} · 15-й и далее: ${later}.`
+                + (unknown ? ` Строк без данных для расчёта: ${unknown}.` : '')
+                + ' Сроки сверяйте по ЭЛН и решениям КЭК в карте.';
+            const granted = await chrome.permissions.contains({ origins: [match] });
+            const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
+            site = { match, id };
+            enable.hidden = granted && registered.length > 0;
+        } catch {
+            status.textContent = 'Не удалось проверить список. Обновите вкладку БАРС и повторите проверку.';
+        } finally {
+            check.disabled = false;
+        }
+    });
+
+    enable.addEventListener('click', async () => {
+        const { match, id } = site;
+        enable.disabled = true;
+        check.disabled = true;
+        try {
+            if (!await chrome.permissions.request({ origins: [match] })) {
+                status.textContent = 'Для автопроверки нужен доступ к сайту БАРС. Ручная проверка доступна через кнопку «КЭК».';
+                return;
+            }
+            if (!(await chrome.scripting.getRegisteredContentScripts({ ids: [id] })).length) {
+                await chrome.scripting.registerContentScripts([{
+                    id, matches: [match], allFrames: true, persistAcrossSessions: true,
+                    js: ['cec-reminders.js'], css: ['cec-reminders.css']
+                }]);
+            }
+            enable.hidden = true;
+            status.textContent = 'Автопроверка включена для этого сайта БАРС. Плашка появится при открытии списка пациентов.';
+        } catch {
+            status.textContent = 'Не удалось включить автопроверку. Повторите попытку.';
+        } finally {
+            enable.disabled = false;
+            check.disabled = false;
+        }
+    });
 }
 
 async function readKidneyDataFromActiveBars(){
@@ -3664,6 +3754,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('appointmentDate').value = new Date().toISOString().slice(0, 10);
     cleanupOldJournalEntries().catch((error) => console.warn('Не удалось очистить журнал назначений', error));
 
+    if (!versionMismatch) initCECReminderControls();
     document.getElementById('settingsToggle').addEventListener('click', openSettingsPanel);
     document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);
     document.getElementById('doctorSelect').addEventListener('change', (event) => {

@@ -60,7 +60,7 @@
 
         .app-header {
             display: grid;
-            grid-template-columns: 34px 1fr 34px;
+            grid-template-columns: 72px 1fr 72px;
             align-items: center;
             min-height: 36px;
             padding-bottom: 8px;
@@ -73,8 +73,13 @@
             border: 0;
         }
 
-        .header-settings {
+        .header-actions {
             grid-column: 3;
+            display: flex;
+            gap: 4px;
+        }
+
+        .header-settings {
             width: 34px;
             height: 34px;
             padding: 0;
@@ -88,6 +93,22 @@
         .header-settings:hover {
             background: #e2eaf1;
         }
+
+        .header-cec {
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .cec-check-panel {
+            margin: 8px 0;
+            padding: 6px 8px;
+            border: 1px solid #c8d1da;
+            border-radius: 6px;
+            background: #eef3f7;
+            font-size: 12px;
+        }
+
+        .cec-check-panel p { margin: 0 0 4px; }
 
         h4 {
             font-size: 13px;
@@ -498,9 +519,17 @@
 </head>
 <body>
     <header class="app-header">
-        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.43</small></h3>
-        <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
+        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.56</small></h3>
+        <div class="header-actions">
+            <button id="cecCheck" class="header-settings header-cec" type="button" title="Проверить сроки КЭК в списке пациентов">КЭК</button>
+            <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
+        </div>
     </header>
+
+    <section id="cecPanel" class="cec-check-panel" hidden>
+        <p id="cecStatus" role="status"></p>
+        <button id="cecEnable" class="small-btn" type="button" hidden>Включить автопроверку на сайте БАРС</button>
+    </section>
 
     <section id="browserCompatWarning" class="compat-warning" role="status" aria-labelledby="browserCompatTitle" hidden>
         <p id="browserCompatTitle"><strong>Браузер устарел.</strong> Некоторые функции могут работать некорректно. Если возможно, обновите Chrome до версии 112 или новее — в ней больше памяти для черновиков.</p>
@@ -594,7 +623,7 @@
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.2.43 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.2.56 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
