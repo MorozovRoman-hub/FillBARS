@@ -65,16 +65,19 @@
         grid.querySelectorAll(ownSelector).forEach(element => element.remove());
     }
 
-    function setBadge(row, link, day, completed) {
+    function historyLink(row) {
+        return row.querySelector('a[name="HH_LINK"], td[column_name="HOSP_HISTORY"] a, td[cont="HOSP_HISTORY"] a');
+    }
+
+    function setBadge(row, day, completed) {
         let badge = row.querySelector(ownSelector);
-        if (!link || day < 13) {
+        const cell = day >= 13 && historyLink(row)?.closest('td');
+        if (!cell) {
             badge?.remove();
             return;
         }
-        if (!badge) {
-            badge = document.createElement('span');
-            link.after(badge);
-        }
+        if (!badge) badge = document.createElement('span');
+        if (badge.parentElement !== cell) cell.append(badge);
         const tone = String(Math.min(day, 15));
         if (badge.dataset.fillbarsCec !== tone) badge.dataset.fillbarsCec = tone;
         const label = completed ? `Проверьте срок КЭК · ${day} дн. после КЭК` : `Проверьте срок КЭК · ${day}-й день`;
@@ -99,7 +102,7 @@
                 error.textContent = 'Строка пациента изменилась. Откройте сводку заново.';
                 return;
             }
-            const history = row.querySelector('a[name="HH_LINK"], td[column_name="HOSP_HISTORY"] a, td[cont="HOSP_HISTORY"] a');
+            const history = historyLink(row);
             if (!history) {
                 error.textContent = 'В строке пациента нет ссылки «Номер ИБ».';
                 return;
@@ -301,11 +304,11 @@
             for (const { row, link, admission, key, unknown } of rows) {
                 if (unknown || (storageUnavailable && key)) {
                     totals.unknown++;
-                    if (render) setBadge(row, null, 0);
+                    if (render) setBadge(row, 0);
                     continue;
                 }
                 if (!link) {
-                    if (render) setBadge(row, null, 0);
+                    if (render) setBadge(row, 0);
                     continue;
                 }
                 const mark = marks[key];
@@ -313,7 +316,7 @@
                 const exempt = mark === notNeeded;
                 const day = exempt ? 0 : completed === null ? (today - admission) / dayMs + 1 : (today - completed) / dayMs;
                 totals.checked++;
-                if (render) setBadge(row, link, day, completed !== null);
+                if (render) setBadge(row, day, completed !== null);
                 if (day >= 13) totals[day === 13 ? 'soon' : day === 14 ? 'next' : 'later']++;
                 const detail = exempt ? 'КЭК не нужна' : completed === null ? `${day}-й день госпитализации`
                     : `КЭК от ${mark.split('-').reverse().join('.')} · прошло ${day} дн.`;

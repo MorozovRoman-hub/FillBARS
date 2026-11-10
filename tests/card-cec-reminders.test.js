@@ -12,6 +12,7 @@ const popup = fs.readFileSync(path.join(__dirname, '../popup.js'), 'utf8');
 
 function row(id, admission, discharge = '', attributes = '') {
     return `<tr cmptype="GridRow" keyvalue="${id}" ${attributes}>
+        <td><a name="HH_LINK" href="#history${id}">ИБ ${id}</a></td>
         <td column_name="PATIENT_FIO_COL"><a name="PAT_LINK" href="#${id}">Пациент ${id}</a></td>
         <td column_name="DATE_IN_TRUNCED">${admission}</td>
         <td column_name="HH_DEP_DATE_OUT">${discharge}</td>
@@ -196,6 +197,8 @@ test('detects the D3 attending doctor list and checks loaded rows without legacy
     assert.equal(badges.length, 1);
     assert.equal(badges[0].closest('[cmptype="Grid"]').getAttribute('name'), 'gridHealingDoctor');
     assert.equal(badges[0].dataset.fillbarsCec, '14');
+    assert.equal(badges[0].parentElement, badges[0].closest('tr').querySelector('[name="HH_LINK"]').closest('td'));
+    assert.equal(badges[0].closest('[column_name="PATIENT_FIO_COL"]'), null);
     document.querySelector('[name="gridHealingDoctor"]').hidden = true;
     await Promise.resolve();
     await repaint(window);
@@ -203,8 +206,7 @@ test('detects the D3 attending doctor list and checks loaded rows without legacy
 });
 
 test('a fresh script reuses the existing summary and removes duplicate panels', async t => {
-    const rows = row(1, '28.10.2026', '', 'isclone="1"').replace('<td column_name="PATIENT_FIO_COL">',
-        '<td><a name="HH_LINK" href="#history1">ИБ 1</a></td><td column_name="PATIENT_FIO_COL">')
+    const rows = row(1, '28.10.2026', '', 'isclone="1"')
         + row(2, '29.10.2026', '', 'isclone="1" class="active"');
     const window = fixture(t, rows, true);
     await repaint(window);
@@ -259,7 +261,9 @@ test('manual check requests no site permission and enabling auto-check registers
     window.TextEncoder = TextEncoder;
     const requests = [];
     const registrations = [];
+    const settings = {};
     window.chrome = {
+        storage: { local: { set: async values => Object.assign(settings, values) } },
         tabs: { query: async () => [{ id: 7, url: 'https://mis.example/bars/#current' }] },
         scripting: {
             executeScript: async ({ files, target, func }) => {
@@ -293,5 +297,6 @@ test('manual check requests no site permission and enabling auto-check registers
     assert.deepEqual(Array.from(requests[0].origins), ['https://mis.example/*']);
     assert.deepEqual(Array.from(registrations[0].matches), ['https://mis.example/*']);
     assert.equal(registrations[0].persistAcrossSessions, true);
+    assert.equal(settings['fillbars-cec-auto:https://mis.example/*'], true);
     assert.equal(enable.hidden, true);
 });

@@ -1,13 +1,13 @@
 (function initializeFillBARSRunner(globalScope) {
     'use strict';
 
-    const VERSION = '5.2.56';
+    const VERSION = '5.2.62';
 
 async function fillForm(formData, profileName, assignmentSettings = {}, diagnosticRunId = '', diagnosticBridgeToken = '') {
     console.log("╔════════════════════════════════════════════════════════════╗");
     console.log("║  МИС БАРС - Автоматическое назначение анализов           ║");
     console.log("║  Разработчик: MorozovRV and Bitucckii VA                 ║");
-    console.log("║  Версия: 5.2.56                                           ║");
+    console.log("║  Версия: 5.2.62                                           ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
     console.log(`=== Автозаполнение: профиль "${profileName}" ===`);
 

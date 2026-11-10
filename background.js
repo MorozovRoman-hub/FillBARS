@@ -416,6 +416,14 @@ async function handleDiagnosticMessage(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === 'fillbars-patient-metrics') {
+        if (sender.id !== chrome.runtime.id || !sender.tab?.id || !/^https?:\/\//.test(sender.url || '')) return false;
+        updatePatientMetrics(sender, message.enabled === true).then(
+            () => sendResponse({ ok: true }),
+            () => sendResponse({ ok: false })
+        );
+        return true;
+    }
     if (message?.type === 'fillbars-cec-print') {
         if (sender.id !== chrome.runtime.id || !sender.tab?.id) return false;
         openCECPrintTemplate(message.patient).then(
@@ -438,6 +446,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
 });
 
+async function updatePatientMetrics(sender, enabled) {
+    const target = { tabId: sender.tab.id, frameIds: [sender.frameId] };
+    const url = new URL(sender.url);
+    const key = `fillbars-patient-metrics:${url.protocol}//${url.hostname}/*`;
+    const run = async () => {
+        const active = enabled && (await chrome.storage.local.get(key))[key] === true;
+        return executeScript({ target, world: 'MAIN', args: [active], func: value => {
+            const metrics = globalThis.FillBARSPatientMetrics;
+            if (!metrics) return false;
+            metrics.update(value);
+            return true;
+        } });
+    };
+    if ((await run())[0]?.result || !enabled) return;
+    if ((await chrome.storage.local.get(key))[key] !== true) return;
+    await executeScript({ target, world: 'MAIN', files: [
+        'kidney-function.js', 'lab-markers.js', 'kidney-bars-adapter.js', 'patient-metrics.js'
+    ] });
+    await run();
+}
+
 async function openCECPrintTemplate(patient) {
     const fullName = typeof patient?.fullName === 'string' ? patient.fullName.trim() : '';
     if (!fullName || fullName.length > 200) throw new Error('cec_missing_patient');
@@ -454,9 +483,29 @@ async function openCECPrintTemplate(patient) {
 }
 
 chrome.runtime.onStartup.addListener(() => {
+    void restoreBarsListScripts().catch(() => {});
     diagnosticOperationQueue = diagnosticOperationQueue
         .catch(() => undefined)
         .then(() => recoverStaleDiagnosticRuns());
 });
+
+chrome.runtime.onInstalled.addListener(() => { void restoreBarsListScripts().catch(() => {}); });
+
+async function restoreBarsListScripts() {
+    const settings = await chrome.storage.local.get(null);
+    const registered = new Set((await chrome.scripting.getRegisteredContentScripts()).map(script => script.id));
+    for (const [key, enabled] of Object.entries(settings)) {
+        const entry = /^fillbars-(patient-metrics|cec-auto):(https?:\/\/[\w.\-]+\/\*)$/.exec(key);
+        if (!entry || enabled !== true) continue;
+        const [, feature, match] = entry;
+        const cec = feature === 'cec-auto';
+        const id = `${cec ? 'cec' : feature}-${Array.from(new TextEncoder().encode(match), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+        if (registered.has(id) || !await chrome.permissions.contains({ origins: [match] })) continue;
+        await chrome.scripting.registerContentScripts([{
+            id, matches: [match], allFrames: true, persistAcrossSessions: true,
+            ...(cec ? { js: ['cec-reminders.js'], css: ['cec-reminders.css'] } : { js: ['patient-metrics-bridge.js'] })
+        }]).catch(() => {});
+    }
+}
 
 importScripts('diary-core.js', 'diary-background.js', 'diary-window.js');

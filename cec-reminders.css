@@ -71,11 +71,13 @@ a.fillbars-cec-history-target {
 }
 
 span[data-fillbars-cec] {
-    display: inline-block;
+    display: block;
+    width: fit-content;
     padding: 1px 4px;
-    margin: 1px 4px;
+    margin-top: 3px;
     border-radius: 4px;
     font: 600 11px/1.4 system-ui, sans-serif;
+    white-space: normal;
 }
 
 [data-fillbars-cec="13"] { background: #fff3bc; color: #573d00; }

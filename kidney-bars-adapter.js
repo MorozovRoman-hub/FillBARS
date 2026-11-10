@@ -153,6 +153,6 @@
         if(!data.glucose)data.warnings.push('Глюкоза с единицей измерения не найдена среди последних 100 лабораторных направлений.');
         return data;
     }
-    const api={read,creatinineFromRows,hemoglobinFromRows,glucoseFromRows,weightFromRows,heightFromRows};scope.FillBARSKidneyBars=api;
+    const api={read,resultLines,creatinineFromRows,hemoglobinFromRows,glucoseFromRows,weightFromRows,heightFromRows};scope.FillBARSKidneyBars=api;
     if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

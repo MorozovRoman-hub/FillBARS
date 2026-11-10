@@ -519,7 +519,7 @@
 </head>
 <body>
     <header class="app-header">
-        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.56</small></h3>
+        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.62</small></h3>
         <div class="header-actions">
             <button id="cecCheck" class="header-settings header-cec" type="button" title="Проверить сроки КЭК в списке пациентов">КЭК</button>
             <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
@@ -623,12 +623,21 @@
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.2.56 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.2.62 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
             <h3>⚙ Настройки</h3>
             <button id="closeSettings" class="small-btn danger" type="button">Закрыть</button>
+        </div>
+
+        <div class="section">
+            <h4>Список пациентов в БАРС</h4>
+            <label class="research-row">
+                <input id="patientMetricsEnabled" type="checkbox" disabled>
+                <span>Включить автоматическое добавление критических параметров в список пациентов</span>
+            </label>
+            <p id="patientMetricsStatus" class="hint" role="status">Откройте «Лечащий врач (NEW)» в БАРС.</p>
         </div>
 
         <div class="section">

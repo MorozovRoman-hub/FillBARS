@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.56';
+const EXTENSION_VERSION = '5.2.62';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -1875,6 +1875,7 @@ function initCECReminderControls() {
                 + ' Сроки сверяйте по ЭЛН и решениям КЭК в карте.';
             const granted = await chrome.permissions.contains({ origins: [match] });
             const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
+            if (granted && registered.length) await chrome.storage.local.set({ [`fillbars-cec-auto:${match}`]: true });
             site = { match, id };
             enable.hidden = granted && registered.length > 0;
         } catch {
@@ -1899,6 +1900,7 @@ function initCECReminderControls() {
                     js: ['cec-reminders.js'], css: ['cec-reminders.css']
                 }]);
             }
+            await chrome.storage.local.set({ [`fillbars-cec-auto:${match}`]: true });
             enable.hidden = true;
             status.textContent = 'Автопроверка включена для этого сайта БАРС. Плашка появится при открытии списка пациентов.';
         } catch {
@@ -1908,6 +1910,69 @@ function initCECReminderControls() {
             check.disabled = false;
         }
     });
+}
+
+async function initPatientMetricsControls() {
+    const checkbox = document.getElementById('patientMetricsEnabled');
+    const status = document.getElementById('patientMetricsStatus');
+    let enabled = false;
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !/^https?:\/\//.test(tab.url || '')) return;
+        const url = new URL(tab.url);
+        const match = `${url.protocol}//${url.hostname}/*`;
+        const key = `fillbars-patient-metrics:${match}`;
+        const id = `patient-metrics-${Array.from(new TextEncoder().encode(match), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+        const target = { tabId: tab.id, allFrames: true };
+        const { [key]: saved } = await chrome.storage.local.get(key);
+        enabled = saved === true;
+        if (!enabled) {
+            const frames = await chrome.scripting.executeScript({ target, func: () => !!document.querySelector(
+                '.healing_emp [cmptype="Grid"][name="gridHealingDoctor"], .pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"]'
+            ) });
+            if (!frames.some(frame => frame.result)) return;
+        }
+        const hint = 'Под фамилиями в списке «Лечащий врач (NEW)» появятся СКФ, гемоглобин, глюкоза, ИМТ, амилаза, общий билирубин и лейкоциты.';
+        checkbox.checked = enabled;
+        checkbox.disabled = false;
+        status.textContent = hint;
+        checkbox.addEventListener('change', async () => {
+            checkbox.disabled = true;
+            try {
+                if (checkbox.checked) {
+                    if (!await chrome.permissions.request({ origins: [match] })) {
+                        status.textContent = 'Для автоматической загрузки нужен доступ к сайту БАРС.';
+                        return;
+                    }
+                    if (!(await chrome.scripting.getRegisteredContentScripts({ ids: [id] })).length) {
+                        await chrome.scripting.registerContentScripts([{
+                            id, matches: [match], allFrames: true, persistAcrossSessions: true,
+                            js: ['patient-metrics-bridge.js']
+                        }]);
+                    }
+                    await chrome.storage.local.set({ [key]: true });
+                    enabled = true;
+                    try {
+                        await chrome.scripting.executeScript({ target, files: ['patient-metrics-bridge.js'] });
+                    } catch {
+                        status.textContent = 'Настройка включена. Обновите вкладку БАРС.';
+                        return;
+                    }
+                } else {
+                    await chrome.storage.local.remove(key);
+                    enabled = false;
+                }
+                status.textContent = hint;
+            } catch {
+                status.textContent = 'Не удалось сохранить настройку. Повторите попытку.';
+            } finally {
+                checkbox.checked = enabled;
+                checkbox.disabled = false;
+            }
+        });
+    } catch {
+        status.textContent = 'Откройте «Лечащий врач (NEW)» в БАРС и заново откройте настройки «Барсука».';
+    }
 }
 
 async function readKidneyDataFromActiveBars(){
@@ -3754,7 +3819,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('appointmentDate').value = new Date().toISOString().slice(0, 10);
     cleanupOldJournalEntries().catch((error) => console.warn('Не удалось очистить журнал назначений', error));
 
-    if (!versionMismatch) initCECReminderControls();
+    if (!versionMismatch) {
+        initCECReminderControls();
+        void initPatientMetricsControls();
+    }
     document.getElementById('settingsToggle').addEventListener('click', openSettingsPanel);
     document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);
     document.getElementById('doctorSelect').addEventListener('change', (event) => {
