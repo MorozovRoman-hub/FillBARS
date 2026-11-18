@@ -3,6 +3,11 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const root=path.resolve(__dirname,'..');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.json'),'utf8'));
 assert.equal(manifest.version,require('../package.json').version);
+for(const file of ['popup.js','bars-adapter.js','fill-runner.js','patient-details-adapter.js']){
+    const script=fs.readFileSync(path.join(root,file),'utf8');
+    const match=script.match(/const\s+(?:EXTENSION_VERSION|VERSION)\s*=\s*['"]([^'"]+)['"]/);
+    assert.equal(match?.[1],manifest.version,`${file}: runtime version must match manifest`);
+}
 assert(fs.existsSync(path.join(root,'images/consent-operation-page-1.png')));
 assert(fs.existsSync(path.join(root,'images/consent-operation-page-2.png')));
 assert.equal(manifest.manifest_version,3);

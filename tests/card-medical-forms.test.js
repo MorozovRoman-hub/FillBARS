@@ -1,14 +1,64 @@
 const test=require('node:test'), assert=require('node:assert/strict'), fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {JSDOM}=require('jsdom');
 const root=path.resolve(__dirname,'..');
-require('../office-export');require('../medical-templates');require('../histology-template');require('../commission-templates');require('../skt-template');require('../consent-templates');require('../extra-templates');require('../followup-templates');require('../medical-print-layouts');require('../operation-catalog');
+require('../office-export');require('../medical-templates');require('../histology-template');require('../commission-templates');require('../skt-template');require('../consent-templates');require('../extra-templates');require('../followup-templates');require('../medical-print-layouts');require('../operation-catalog');require('../oncology-templates');require('../oncology-print-layouts');
 const forms=require('../medical-forms');
 const templates=globalThis.__FillBARSMedicalTemplates__;
 const synthetic={fullName:'Тестов Тест Тестович',surname:'Тестов',firstName:'Тест',patronymic:'Тестович',birthDate:'02.03.1980',documentDate:'24.09.2026',medicalOrganization:'ТЕСТОВАЯ МЕДИЦИНСКАЯ ОРГАНИЗАЦИЯ',registeredAddress:'Тестовый город, улица Примерная, дом 1',passport:'ТЕСТОВЫЙ ДОКУМЕНТ',doctorName:'Тестов Т.Т.',department:'Тестовое отделение',diagnosis:'Тестовый текст для проверки оформления',icdCode:'TEST',policyNumber:'0000000000000000',snils:'000-000-000 00',destination:'Тестовое учреждение'};
 function unzipStored(bytes){const b=Buffer.from(bytes), result={};let at=0;while(b.readUInt32LE(at)===0x04034b50){const size=b.readUInt32LE(at+18),n=b.readUInt16LE(at+26),extra=b.readUInt16LE(at+28);const name=b.subarray(at+30,at+30+n).toString();const start=at+30+n+extra;result[name]=b.subarray(start,start+size);at=start+size;}return result;}
-test('twenty genuine Office packages export, preserve untouched parts and escape XML',()=>{
+
+test('oncology discharge and advanced cancer forms load from the menu with editable, patient-free clinical fields',()=>{
+ const html=fs.readFileSync(path.join(root,'medical-forms.html'),'utf8');
+ const popup=fs.readFileSync(path.join(root,'popup.html'),'utf8');
+ for(const kind of ['oncologyDischarge','advancedOncology']){
+  assert(popup.includes(`value="${kind}"`));
+  assert(fs.readFileSync(path.join(root,'popup.js'),'utf8').includes(`'${kind}'`));
+  const key=`fillbars-medical-${kind}-test`;
+  const dom=new JSDOM(html,{url:`https://extension.test/medical-forms.html?template=${kind}&payload=${key}`,runScripts:'outside-only'});
+  const w=dom.window;w.TextEncoder=TextEncoder;w.TextDecoder=TextDecoder;
+  w.localStorage.setItem(key,JSON.stringify({generatedAt:new Date().toISOString(),patient:{...synthetic,tnm:'DO NOT INFER',lateDiagnosisReasons:'DO NOT INFER'}}));
+  for(const script of w.document.querySelectorAll('script[src]'))w.eval(fs.readFileSync(path.join(root,script.getAttribute('src')),'utf8'));
+  assert.equal(w.localStorage.getItem(key),null);
+  assert.equal(w.document.getElementById(kind==='advancedOncology'?'surname':'fullName').value,kind==='advancedOncology'?'Тестов':synthetic.fullName);
+  assert.equal(w.document.getElementById('tnm').value,'');
+  const field=kind==='advancedOncology'?'clinicalReview':'recommendations';
+  const input=w.document.getElementById(field);assert.equal(input.tagName,'TEXTAREA');
+  input.value='Первая строка < &\nВторая строка';input.dispatchEvent(new w.Event('input'));
+  const frame=w.document.querySelector('iframe.source-preview-frame');assert(frame);
+  assert(frame.srcdoc.includes('Первая строка &lt; &amp;\nВторая строка'));
+  for(const entry of templates[kind].entries.filter(e=>e.name.endsWith('.xml'))){
+   const xml=Buffer.from(entry.data,'base64').toString();
+   assert(!/Козлов|Агафонкина|Клацкина|Анатольевич|1958|23а/.test(xml));
+  }
+  const xml=unzipStored(forms.createFile(templates[kind],{...synthetic,[field]:input.value}))['word/document.xml'].toString();
+  assert(xml.includes('Первая строка &lt; &amp;</w:t><w:br/>'));
+  assert(!xml.includes('{{'));dom.window.close();
+ }
+});
+test('discharge checkboxes are editable inputs and checked values survive preview and Word export',()=>{
+ const html=fs.readFileSync(path.join(root,'medical-forms.html'),'utf8');
+ const dom=new JSDOM(html,{url:'https://extension.test/medical-forms.html?template=oncologyDischarge',runScripts:'outside-only'});
+ const w=dom.window;w.TextEncoder=TextEncoder;w.TextDecoder=TextDecoder;
+ for(const script of w.document.querySelectorAll('script[src]'))w.eval(fs.readFileSync(path.join(root,script.getAttribute('src')),'utf8'));
+ const t=templates.oncologyDischarge;
+ assert.equal(Object.keys(t.fieldSections).length,15);
+ assert(Object.keys(t.checkboxes).length>90);
+ const checked={};
+ for(const field of Object.keys(t.checkboxes)){
+  const input=w.document.getElementById(field);assert.equal(input.type,'checkbox');assert(!input.checked);
+  input.checked=true;input.dispatchEvent(new w.Event('input'));checked[field]='☑';
+  assert(w.document.querySelector('iframe').srcdoc.includes('☑'));
+  input.checked=false;input.dispatchEvent(new w.Event('input'));
+ }
+ const xml=unzipStored(forms.createFile(t,checked))['word/document.xml'].toString();
+ assert.equal((xml.match(/☑/g)||[]).length,Object.keys(t.checkboxes).length);
+ assert(!xml.includes('┌'));assert(!xml.includes('└'));assert(!xml.includes('{{'));
+ dom.window.close();
+});
+
+test('twenty-two genuine Office packages export, preserve untouched parts and escape XML',()=>{
  const out=path.join(root,'tests/artifacts/medical');fs.mkdirSync(out,{recursive:true});
- assert.equal(Object.keys(templates).length,20);
+ assert.equal(Object.keys(templates).length,22);
  for(const [kind,t]of Object.entries(templates)){
   const values={...synthetic};for(const key of Object.keys(t.checkboxes||{}))values[key]='□';
   const bytes=forms.createFile(t,values), parts=unzipStored(bytes);

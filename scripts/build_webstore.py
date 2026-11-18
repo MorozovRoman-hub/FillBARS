@@ -14,7 +14,7 @@ blood-request.css blood-request.html blood-request.js diaries.css diaries.html d
 diary-background.js diary-bars-adapter.js diary-core.js diary-icons.svg diary-launch.js diary-window.js
 drug-catalog-zhvnlp-2025.json fill-runner.js fillbars-config.json office-export.js office-templates.js
 popup.html popup.js print.css print.html print.js transfusion.css transfusion.html transfusion.js
-medical-forms.html medical-forms.css medical-forms.js medical-templates.js histology-template.js histology-print-layout.js commission-templates.js commission-print-layouts.js skt-template.js consent-templates.js extra-templates.js followup-templates.js medical-print-layouts.js operation-catalog.js patient-details-adapter.js LICENSE'''.split()
+medical-forms.html medical-forms.css medical-forms.js medical-templates.js oncology-templates.js oncology-print-layouts.js histology-template.js histology-print-layout.js commission-templates.js commission-print-layouts.js skt-template.js consent-templates.js extra-templates.js followup-templates.js medical-print-layouts.js operation-catalog.js patient-details-adapter.js LICENSE'''.split()
 RUNTIME_FILES += ['kidney-function.js', 'kidney-bars-adapter.js', 'lab-markers.js', 'lab-trends.js', 'lab-trends.css']
 RUNTIME_FILES += ['cec-reminders.js', 'cec-reminders.css']
 RUNTIME_FILES += ['patient-metrics.js', 'patient-metrics-bridge.js']
@@ -31,6 +31,13 @@ class References(HTMLParser):
 
 def validate(files):
     manifest = json.loads(files['manifest.json'])
+    for name in ('popup.js', 'bars-adapter.js', 'fill-runner.js', 'patient-details-adapter.js'):
+        match = re.search(r"const\s+(?:EXTENSION_VERSION|VERSION)\s*=\s*['\"]([^'\"]+)['\"]", files[name].decode('utf-8'))
+        assert match and match[1] == manifest['version'], f'{name}: runtime version differs from manifest'
+    for name, data in files.items():
+        if name.endswith('.html'):
+            for version in re.findall(r'\?v=([0-9.]+)', data.decode('utf-8')):
+                assert version == manifest['version'], f'{name}: stale asset version {version}'
     refs = set(manifest.get('icons', {}).values())
     refs.update(manifest['action']['default_icon'].values())
     refs.update((manifest['background']['service_worker'], manifest['action']['default_popup']))

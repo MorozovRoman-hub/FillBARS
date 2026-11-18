@@ -418,7 +418,7 @@ async function handleDiagnosticMessage(message, sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'fillbars-patient-metrics') {
         if (sender.id !== chrome.runtime.id || !sender.tab?.id || !/^https?:\/\//.test(sender.url || '')) return false;
-        updatePatientMetrics(sender, message.enabled === true).then(
+        updatePatientMetrics(sender).then(
             () => sendResponse({ ok: true }),
             () => sendResponse({ ok: false })
         );
@@ -446,21 +446,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
 });
 
-async function updatePatientMetrics(sender, enabled) {
+async function updatePatientMetrics(sender) {
     const target = { tabId: sender.tab.id, frameIds: [sender.frameId] };
     const url = new URL(sender.url);
     const key = `fillbars-patient-metrics:${url.protocol}//${url.hostname}/*`;
+    const historyKey = `fillbars-history-metrics:${url.protocol}//${url.hostname}/*`;
+    const repeatKey = `fillbars-lab-repeat:${url.protocol}//${url.hostname}/*`;
+    const daysKey = `fillbars-lab-repeat-days:${url.protocol}//${url.hostname}/*`;
+    const keys = [key, historyKey, repeatKey, daysKey];
     const run = async () => {
-        const active = enabled && (await chrome.storage.local.get(key))[key] === true;
-        return executeScript({ target, world: 'MAIN', args: [active], func: value => {
+        const settings = await chrome.storage.local.get(keys);
+        return executeScript({ target, world: 'MAIN', args: [settings[key] === true, settings[historyKey] === true,
+            { enabled: settings[repeatKey] === true, days: settings[daysKey] }], func: (value, history, repeat) => {
             const metrics = globalThis.FillBARSPatientMetrics;
             if (!metrics) return false;
-            metrics.update(value);
+            metrics.update(value, history, repeat);
             return true;
         } });
     };
-    if ((await run())[0]?.result || !enabled) return;
-    if ((await chrome.storage.local.get(key))[key] !== true) return;
+    if ((await run())[0]?.result) return;
+    const settings = await chrome.storage.local.get(keys);
+    if (settings[key] !== true && settings[historyKey] !== true && settings[repeatKey] !== true) return;
     await executeScript({ target, world: 'MAIN', files: [
         'kidney-function.js', 'lab-markers.js', 'kidney-bars-adapter.js', 'patient-metrics.js'
     ] });
@@ -495,17 +501,25 @@ async function restoreBarsListScripts() {
     const settings = await chrome.storage.local.get(null);
     const registered = new Set((await chrome.scripting.getRegisteredContentScripts()).map(script => script.id));
     for (const [key, enabled] of Object.entries(settings)) {
-        const entry = /^fillbars-(patient-metrics|cec-auto):(https?:\/\/[\w.\-]+\/\*)$/.exec(key);
+        const entry = /^fillbars-(patient-metrics|history-metrics|lab-repeat|cec-auto):(https?:\/\/[\w.\-]+\/\*)$/.exec(key);
         if (!entry || enabled !== true) continue;
         const [, feature, match] = entry;
         const cec = feature === 'cec-auto';
-        const id = `${cec ? 'cec' : feature}-${Array.from(new TextEncoder().encode(match), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+        const id = `${cec ? 'cec' : 'patient-metrics'}-${Array.from(new TextEncoder().encode(match), byte => byte.toString(16).padStart(2, '0')).join('')}`;
         if (registered.has(id) || !await chrome.permissions.contains({ origins: [match] })) continue;
         await chrome.scripting.registerContentScripts([{
             id, matches: [match], allFrames: true, persistAcrossSessions: true,
             ...(cec ? { js: ['cec-reminders.js'], css: ['cec-reminders.css'] } : { js: ['patient-metrics-bridge.js'] })
         }]).catch(() => {});
+        registered.add(id);
+        if (!cec) {
+            const tabs = await chrome.tabs.query({ url: [match] });
+            await Promise.allSettled(tabs.filter(tab => tab.id).map(tab => executeScript({
+                target: { tabId: tab.id, allFrames: true }, files: ['patient-metrics-bridge.js']
+            })));
+        }
     }
 }
 
 importScripts('diary-core.js', 'diary-background.js', 'diary-window.js');
+void restoreBarsListScripts().catch(() => {});

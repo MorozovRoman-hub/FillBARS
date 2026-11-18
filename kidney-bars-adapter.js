@@ -2,8 +2,14 @@
 (function(scope){
     'use strict';
     const tidy=value=>String(value??'').replace(/\s+/g,' ').trim();
-    const pageOf=(element,name)=>element?.form?.page||element?.jsParent?.page||element?.DForm?.page
-        ||[...(scope.SYS_pages||[]),...(scope.SYS_pages_window||[])].find(item=>item?.form?.name===name&&item.form.containerForm?.contains(element))?.form;
+    function pageOf(element,name){
+        for(let node=element;node;node=node.parentElement){
+            const page=node.form?.page||node.jsParent?.page||node.DForm?.page||node.D3Form?.page||node.page;
+            if(page&&!page.destroyed&&typeof page.getVar==='function')return page;
+        }
+        return [...(scope.SYS_pages||[]),...(scope.SYS_pages_window||[])].find(item=>
+            item?.form?.name===name&&item.form.containerForm?.contains(element))?.form;
+    }
     const get=(page,name)=>{try{return tidy(page?.getVar?.(name));}catch(_){return '';}};
     const caption=(page,element,name)=>{try{return tidy(page?.getCaption?.(name)||element?.querySelector(`[name="${name}"]`)?.textContent);}catch(_){return '';}};
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -153,6 +159,6 @@
         if(!data.glucose)data.warnings.push('Глюкоза с единицей измерения не найдена среди последних 100 лабораторных направлений.');
         return data;
     }
-    const api={read,resultLines,creatinineFromRows,hemoglobinFromRows,glucoseFromRows,weightFromRows,heightFromRows};scope.FillBARSKidneyBars=api;
+    const api={read,pageOf,resultLines,creatinineFromRows,hemoglobinFromRows,glucoseFromRows,weightFromRows,heightFromRows};scope.FillBARSKidneyBars=api;
     if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

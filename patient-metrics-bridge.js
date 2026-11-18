@@ -4,25 +4,19 @@
     globalThis.FillBARSPatientMetricsBridge = true;
 
     const key = `fillbars-patient-metrics:${location.protocol}//${location.hostname}/*`;
-    let enabled = false;
+    const historyKey = `fillbars-history-metrics:${location.protocol}//${location.hostname}/*`;
+    const repeatKey = `fillbars-lab-repeat:${location.protocol}//${location.hostname}/*`;
+    const daysKey = `fillbars-lab-repeat-days:${location.protocol}//${location.hostname}/*`;
     let pending = Promise.resolve();
 
-    function apply(active) {
-        if (enabled === active) return;
-        enabled = active;
+    function apply() {
         pending = pending.catch(() => {}).then(async () => {
-            if (enabled !== active) return;
-            await chrome.runtime.sendMessage({ type: 'fillbars-patient-metrics', enabled: active });
+            await chrome.runtime.sendMessage({ type: 'fillbars-patient-metrics' });
         }).catch(() => {});
     }
 
-    let changed = false;
     chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== 'local' || !Object.hasOwn(changes, key)) return;
-        changed = true;
-        apply(changes[key].newValue === true);
+        if (area === 'local' && [key, historyKey, repeatKey, daysKey].some(key => Object.hasOwn(changes, key))) apply();
     });
-    chrome.storage.local.get(key).then(saved => {
-        if (!changed) apply(saved[key] === true);
-    }).catch(() => {});
+    apply();
 })();

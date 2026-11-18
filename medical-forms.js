@@ -1,6 +1,7 @@
 (async function (scope) {
     'use strict';
     const titles = { palliative: 'Заключение ВК для паллиативной помощи', cec: 'КЭК — представление и заключение', histology: 'Гистология — направление 014/у и протокол 014-1/у', military: 'Выписка для военнослужащих', commission: 'Заключение врачебной комиссии', referral: 'Направление — форма 057/у-04', oncology: 'Извещение о впервые выявленном новообразовании', tmk: 'Заявка на телемедицинскую консультацию', skt: 'Направление на СКТ', operationConsent: 'Согласие на операцию', anesthesiaConsent: 'Согласие на анестезию', colonoscopyConsent:'Согласие на колоноскопию', bronchoscopyConsent:'Согласие на бронхоскопию', gastroscopyConsent:'Согласие на гастроскопию', thrombolysisConsent:'Согласие на тромболизис', operationProtocol:'Протокол операции', workInjury315:'Медицинское заключение 315-1/у', workInjury316:'Медицинское заключение 316-1/у', epidemicInvestigation:'Карта эпидемиологического расследования', centralCatheter:'Протокол катетеризации центральной вены' };
+    Object.assign(titles, {oncologyDischarge:'Выписка онкологического пациента — форма 027-1/у',advancedOncology:'Протокол запущенной формы ЗНО — форма 027-2/у'});
     const oncologyChoiceSections = [
         {id:'sex',title:'05. Пол',rows:[16]},
         {id:'residence',title:'08. Житель',rows:[21]},
@@ -152,6 +153,22 @@
         else if(kind==='tmk') preview.innerHTML='<table>'+template.fields.map(field=>`<tr><td>${escape(labels[field]||field)}</td><td>${escape(values[field])}</td></tr>`).join('')+'</table>';
         else preview.innerHTML=template.preview.replace(/\{\{(\w+)\}\}/g,(_m,field)=>`<span class="value">${escape(values[field]||'________')}</span>`);
     };
+    if(kind==='oncologyDischarge'&&printFrame){
+        printFrame.addEventListener('load',()=>{
+            const doc=printFrame.contentDocument;if(!doc)return;
+            for(const node of doc.querySelectorAll('[data-fillbars-field]')){
+                const field=node.dataset.fillbarsField;
+                if(!Object.hasOwn(template.checkboxes||{},field))continue;
+                node.setAttribute('role','checkbox');node.setAttribute('tabindex','0');
+                node.setAttribute('aria-label',template.checkboxes[field]);
+                node.setAttribute('aria-checked',String(values[field]==='☑'));
+                node.style.cursor='pointer';
+                const toggle=()=>{const input=document.getElementById(field);if(!input)return;input.checked=!input.checked;input.dispatchEvent(new Event('input',{bubbles:true}));};
+                node.addEventListener('click',toggle);
+                node.addEventListener('keydown',event=>{if(event.key===' '||event.key==='Enter'){event.preventDefault();toggle();}});
+            }
+        });
+    }
     const choiceSectionByField=new Map();
     if(kind==='oncology') for(const section of oncologyChoiceSections){
         section.fields=Object.keys(template.checkboxes||{}).filter(field=>section.rows.some(row=>field.startsWith(`check${row}x`)));

@@ -4,7 +4,7 @@
 
 const CONFIG_FILE_NAME = 'fillbars-config.json';
 const DRUG_CATALOG_FILE_NAME = 'drug-catalog-zhvnlp-2025.json';
-const EXTENSION_VERSION = '5.2.63';
+const EXTENSION_VERSION = '5.2.76';
 let CONFIG_TEMPLATES = {};
 let CONFIG_ACTIVE_PROFILE_NAMES = [];
 let CONFIG_RESEARCH_CATALOG = {};
@@ -1912,31 +1912,60 @@ function initCECReminderControls() {
     });
 }
 
-async function initPatientMetricsControls() {
-    const checkbox = document.getElementById('patientMetricsEnabled');
-    const status = document.getElementById('patientMetricsStatus');
+async function initPatientMetricsControls(history = false) {
+    const repeat = history === 'reminder';
+    const checkbox = document.getElementById(repeat ? 'labRepeatEnabled' : history ? 'historyMetricsEnabled' : 'patientMetricsEnabled');
+    const status = document.getElementById(repeat ? 'labRepeatStatus' : history ? 'historyMetricsStatus' : 'patientMetricsStatus');
+    const daysInput = repeat && document.getElementById('labRepeatDays');
     let enabled = false;
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab?.id || !/^https?:\/\//.test(tab.url || '')) return;
         const url = new URL(tab.url);
         const match = `${url.protocol}//${url.hostname}/*`;
-        const key = `fillbars-patient-metrics:${match}`;
+        const key = `fillbars-${repeat ? 'lab-repeat' : history ? 'history-metrics' : 'patient-metrics'}:${match}`;
+        const daysKey = `fillbars-lab-repeat-days:${match}`;
         const id = `patient-metrics-${Array.from(new TextEncoder().encode(match), byte => byte.toString(16).padStart(2, '0')).join('')}`;
         const target = { tabId: tab.id, allFrames: true };
         const { [key]: saved } = await chrome.storage.local.get(key);
         enabled = saved === true;
         if (!enabled) {
             const frames = await chrome.scripting.executeScript({ target, func: () => !!document.querySelector(
-                '.healing_emp [cmptype="Grid"]:is([name="gridHealingDoctor"], [name="gridDutyDoctor"]), '
-                + '.pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"]'
+                '.healing_emp [cmptype="Grid"]:is([name="gridHealingDoctor"], [name="gridDutyDoctor"], [name="gridPatsInObservation"]), '
+                + '.pat_in_dep_healing_emp [cmptype="Grid"][name="GRID_HH"], .hosp_history_new'
             ) });
             if (!frames.some(frame => frame.result)) return;
         }
-        const hint = 'На вкладках «Лечащий врач» и «Дежурный врач» под фамилиями появятся СКФ, гемоглобин, глюкоза, ИМТ, амилаза, общий билирубин и лейкоциты.';
+        const hint = repeat
+            ? 'Строка «Повторить анализы!» появится в колонке «Сигнальная информация», когда срок истечёт хотя бы для одного анализа. Даты проверяются отдельно; при наведении видно, какой анализ пора повторить. Если дата результата неизвестна, напоминание по нему не рассчитывается.'
+            : history
+            ? 'Показатели загрузятся автоматически при открытии истории болезни рядом с сигнальной информацией.'
+            : 'На вкладках «Лечащий врач», «Дежурный врач» и «Пациенты под наблюдением» под фамилиями появятся СКФ, гемоглобин, глюкоза, ИМТ, амилаза, общий билирубин, лейкоциты и общий белок.';
         checkbox.checked = enabled;
         checkbox.disabled = false;
         status.textContent = hint;
+        if (repeat) {
+            const savedDays = (await chrome.storage.local.get(daysKey))[daysKey];
+            let days = Number.isInteger(savedDays) && savedDays >= 1 && savedDays <= 365 ? savedDays : 7;
+            daysInput.value = days;
+            daysInput.disabled = false;
+            daysInput.addEventListener('change', async () => {
+                const value = Number(daysInput.value);
+                if (!Number.isInteger(value) || value < 1 || value > 365) {
+                    daysInput.value = days;
+                    status.textContent = 'Укажите целое число от 1 до 365 дней.';
+                    return;
+                }
+                try {
+                    await chrome.storage.local.set({ [daysKey]: value });
+                    days = value;
+                    status.textContent = hint;
+                } catch {
+                    daysInput.value = days;
+                    status.textContent = 'Не удалось сохранить срок. Повторите попытку.';
+                }
+            });
+        }
         checkbox.addEventListener('change', async () => {
             checkbox.disabled = true;
             try {
@@ -2070,7 +2099,7 @@ async function openMedicalTemplate(event) {
         else await openTransfusionProtocol();
         return;
     }
-    if (!['military', 'commission', 'palliative', 'cec', 'referral', 'histology', 'skt', 'oncology', 'tmk', 'operationConsent', 'anesthesiaConsent', 'colonoscopyConsent', 'bronchoscopyConsent', 'gastroscopyConsent', 'thrombolysisConsent', 'operationProtocol', 'workInjury315', 'workInjury316', 'epidemicInvestigation', 'centralCatheter'].includes(template)) return;
+    if (!['military', 'commission', 'palliative', 'cec', 'referral', 'histology', 'skt', 'oncology', 'oncologyDischarge', 'advancedOncology', 'tmk', 'operationConsent', 'anesthesiaConsent', 'colonoscopyConsent', 'bronchoscopyConsent', 'gastroscopyConsent', 'thrombolysisConsent', 'operationProtocol', 'workInjury315', 'workInjury316', 'epidemicInvestigation', 'centralCatheter'].includes(template)) return;
     select.disabled = true;
     setStatus('⏳ Получаю данные для бланка…', '#ff9800');
     try {
@@ -3823,6 +3852,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!versionMismatch) {
         initCECReminderControls();
         void initPatientMetricsControls();
+        void initPatientMetricsControls(true);
+        void initPatientMetricsControls('reminder');
     }
     document.getElementById('settingsToggle').addEventListener('click', openSettingsPanel);
     document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);

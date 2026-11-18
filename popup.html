@@ -519,7 +519,7 @@
 </head>
 <body>
     <header class="app-header">
-        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.63</small></h3>
+        <h3>FillBARS Card <small style="font-size:11px;color:#267c51">5.2.76</small></h3>
         <div class="header-actions">
             <button id="cecCheck" class="header-settings header-cec" type="button" title="Проверить сроки КЭК в списке пациентов">КЭК</button>
             <button id="settingsToggle" class="header-settings" type="button" title="Настройки и профили" aria-label="Настройки и профили">⚙</button>
@@ -562,6 +562,8 @@
                 <option value="histology">Гистология — направление и протокол</option>
                 <option value="skt">Направление на СКТ</option>
                 <option value="oncology">Впервые выявленное новообразование</option>
+                <option value="oncologyDischarge">Выписка онкологического пациента (027-1/у)</option>
+                <option value="advancedOncology">Поздняя стадия ЗНО (027-2/у)</option>
                 <option value="tmk">Телемедицинская консультация (Excel)</option>
                 <option value="operationConsent">Согласие на операцию</option>
                 <option value="anesthesiaConsent">Согласие на анестезию</option>
@@ -623,7 +625,7 @@
     <div id="status" class="status"></div>
     <div class="footer">Все данные обрабатываются локально внутри расширения</div>
     <div class="author">🧠 Идея и разработка: <strong>MorozovRV</strong> и <strong>Bitucckyi VA</strong></div>
-    <div class="version">Версия 5.2.63 | Для медицинских информационных систем</div>
+    <div class="version">Версия 5.2.76 | Для медицинских информационных систем</div>
 
     <div id="settingsPanel" class="panel hidden">
         <div class="panel-header">
@@ -638,6 +640,19 @@
                 <span>Включить автоматическое добавление критических параметров в список пациентов</span>
             </label>
             <p id="patientMetricsStatus" class="hint" role="status">Откройте «Лечащий врач (NEW)» в БАРС.</p>
+            <label class="research-row">
+                <input id="historyMetricsEnabled" type="checkbox" disabled>
+                <span>Показывать анализы в сигнальной информации истории болезни</span>
+            </label>
+            <p id="historyMetricsStatus" class="hint" role="status">Откройте список пациентов или историю болезни в БАРС.</p>
+            <label class="research-row">
+                <input id="labRepeatEnabled" type="checkbox" disabled>
+                <span>Напоминать о контрольных анализах крови (клинический и биохимический)</span>
+            </label>
+            <label for="labRepeatDays">Повторять через
+                <input id="labRepeatDays" type="number" min="1" max="365" step="1" value="7" style="width:70px" disabled> дней
+            </label>
+            <p id="labRepeatStatus" class="hint" role="status">Откройте список пациентов в БАРС.</p>
         </div>
 
         <div class="section">
